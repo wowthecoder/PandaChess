@@ -11,14 +11,18 @@ if(NOT GTest_FOUND)
 endif()
 
 add_executable(test_board test_board.cpp)
+add_executable(test_movegen test_movegen.cpp)
 
 if(TARGET GTest::gtest)
     target_link_libraries(test_board PRIVATE engine GTest::gtest)
+    target_link_libraries(test_movegen PRIVATE engine GTest::gtest)
 elseif(TARGET GTest::GTest)
     target_link_libraries(test_board PRIVATE engine GTest::GTest)
+    target_link_libraries(test_movegen PRIVATE engine GTest::GTest)
 else()
     message(FATAL_ERROR "Could not find a GoogleTest target to link")
 endif()
 
 include(GoogleTest)
 gtest_discover_tests(test_board)
+gtest_discover_tests(test_movegen)

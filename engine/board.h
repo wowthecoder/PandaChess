@@ -2,6 +2,7 @@
 
 #include "types.h"
 #include "bitboard.h"
+#include "move.h"
 #include <cstdint>
 #include <string>
 
@@ -38,7 +39,14 @@ public:
 
     Bitboard pieces(Piece p) const { return pieceBB[p]; }
     Bitboard pieces(Color c) const { return occupancy[c]; }
+    Bitboard pieces(Color c, PieceType pt) const { return pieceBB[make_piece(c, pt)]; }
     Bitboard all_pieces() const { return occupancy[2]; }
+
+    // Attack detection
+    bool is_square_attacked(Square s, Color attacker) const;
+
+    // Make a move on the board (modifies in place)
+    void make_move(Move m);
 
 private:
     void clear();

@@ -1,4 +1,5 @@
 #include "board.h"
+#include "attacks.h"
 #include "zobrist.h"
 #include <sstream>
 #include <cassert>
@@ -211,6 +212,118 @@ std::string Board::print() const {
     os << "FEN: " << to_fen() << '\n';
     os << "Hash: 0x" << std::hex << hash << std::dec << '\n';
     return os.str();
+}
+
+bool Board::is_square_attacked(Square s, Color attacker) const {
+    Bitboard occ = all_pieces();
+    if (attacks::pawn_attacks(~attacker, s) & pieces(attacker, Pawn))   return true;
+    if (attacks::knight_attacks(s) & pieces(attacker, Knight))          return true;
+    if (attacks::king_attacks(s) & pieces(attacker, King))              return true;
+    if (attacks::bishop_attacks(s, occ) & (pieces(attacker, Bishop) | pieces(attacker, Queen))) return true;
+    if (attacks::rook_attacks(s, occ) & (pieces(attacker, Rook) | pieces(attacker, Queen)))     return true;
+    return false;
+}
+
+// Castling rights update table: indexed by square, gives mask to AND with castling rights
+static constexpr CastlingRights CastlingUpdate[64] = {
+    // A1                                                           H1
+    CastlingRights(~WhiteQueenSide & 0xF), AllCastling, AllCastling, AllCastling,
+    CastlingRights(~(WhiteKingSide | WhiteQueenSide) & 0xF), AllCastling, AllCastling,
+    CastlingRights(~WhiteKingSide & 0xF),
+    // A2-H2 through A7-H7
+    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    // A8                                                           H8
+    CastlingRights(~BlackQueenSide & 0xF), AllCastling, AllCastling, AllCastling,
+    CastlingRights(~(BlackKingSide | BlackQueenSide) & 0xF), AllCastling, AllCastling,
+    CastlingRights(~BlackKingSide & 0xF),
+};
+
+void Board::make_move(Move m) {
+    Square from = move_from(m);
+    Square to   = move_to(m);
+    MoveType mt = move_type(m);
+    Piece moved  = mailbox[from];
+    Piece captured = mailbox[to];
+    Color us = sideToMove;
+
+    // Remove old castling hash, EP hash
+    hash ^= zobrist::castlingKeys[castling];
+    if (epSquare != NoSquare)
+        hash ^= zobrist::enPassantKeys[square_file(epSquare)];
+
+    // Reset en passant
+    epSquare = NoSquare;
+
+    if (mt == EnPassant) {
+        // The captured pawn is on a different square
+        Square capSq = make_square(square_file(to), square_rank(from));
+        remove_piece(capSq);
+        remove_piece(from);
+        put_piece(moved, to);
+        halfmoveClock = 0;
+    } else if (mt == Castling) {
+        // Move king
+        remove_piece(from);
+        put_piece(moved, to);
+        // Move rook
+        Square rookFrom, rookTo;
+        if (to > from) { // Kingside
+            rookFrom = make_square(7, square_rank(from));
+            rookTo   = make_square(5, square_rank(from));
+        } else { // Queenside
+            rookFrom = make_square(0, square_rank(from));
+            rookTo   = make_square(3, square_rank(from));
+        }
+        Piece rook = mailbox[rookFrom];
+        remove_piece(rookFrom);
+        put_piece(rook, rookTo);
+        halfmoveClock++;
+    } else if (mt == Promotion) {
+        PieceType promoPt = promotion_type(m);
+        Piece promoPiece = make_piece(us, promoPt);
+        if (captured != NoPiece) remove_piece(to);
+        remove_piece(from);
+        put_piece(promoPiece, to);
+        halfmoveClock = 0;
+    } else {
+        // Normal move
+        if (captured != NoPiece) {
+            remove_piece(to);
+            halfmoveClock = 0;
+        } else if (piece_type(moved) == Pawn) {
+            halfmoveClock = 0;
+            // Double pawn push — set en passant square
+            int diff = to - from;
+            if (diff == 16 || diff == -16) {
+                epSquare = Square((from + to) / 2);
+            }
+        } else {
+            halfmoveClock++;
+        }
+        remove_piece(from);
+        put_piece(moved, to);
+    }
+
+    // Update castling rights
+    castling &= CastlingUpdate[from];
+    castling &= CastlingUpdate[to];
+
+    // Update fullmove number
+    if (us == Black) fullmoveNumber++;
+
+    // Switch side
+    sideToMove = ~us;
+    hash ^= zobrist::sideKey;
+
+    // Add new castling hash, EP hash
+    hash ^= zobrist::castlingKeys[castling];
+    if (epSquare != NoSquare)
+        hash ^= zobrist::enPassantKeys[square_file(epSquare)];
 }
 
 } // namespace panda
