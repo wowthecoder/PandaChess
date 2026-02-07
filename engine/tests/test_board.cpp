@@ -1,43 +1,19 @@
+#include "../bitboard.h"
 #include "../board.h"
 #include "../zobrist.h"
-#include "../bitboard.h"
-#include <iostream>
-#include <cstdlib>
+#include <gtest/gtest.h>
 #include <string>
-
-static int tests_passed = 0;
-static int tests_failed = 0;
-
-#define TEST(name) void name()
-#define ASSERT_EQ(a, b) do { \
-    if ((a) != (b)) { \
-        std::cerr << "  FAIL: " << #a << " != " << #b \
-                  << " (got " << (a) << " vs " << (b) << ")" \
-                  << " at " << __FILE__ << ":" << __LINE__ << '\n'; \
-        tests_failed++; return; \
-    } \
-} while(0)
-
-#define ASSERT_TRUE(expr) do { \
-    if (!(expr)) { \
-        std::cerr << "  FAIL: " << #expr \
-                  << " at " << __FILE__ << ":" << __LINE__ << '\n'; \
-        tests_failed++; return; \
-    } \
-} while(0)
-
-#define RUN_TEST(name) do { \
-    std::cout << "Running " << #name << "... "; \
-    name(); \
-    if (tests_failed == prev_failed) { \
-        tests_passed++; \
-        std::cout << "OK\n"; \
-    } else { prev_failed = tests_failed; } \
-} while(0)
 
 using namespace panda;
 
-TEST(test_start_position) {
+class BoardTestEnvironment : public ::testing::Environment {
+public:
+    void SetUp() override {
+        zobrist::init();
+    }
+};
+
+TEST(BoardTest, StartPosition) {
     Board board;
     board.set_fen(StartFEN);
 
@@ -75,7 +51,7 @@ TEST(test_start_position) {
     ASSERT_EQ(board.all_pieces(), RankMask[0] | RankMask[1] | RankMask[6] | RankMask[7]);
 }
 
-TEST(test_custom_fen) {
+TEST(BoardTest, CustomFen) {
     Board board;
     // Position after 1. e4
     board.set_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
@@ -87,7 +63,7 @@ TEST(test_custom_fen) {
     ASSERT_EQ(board.castling_rights(), AllCastling);
 }
 
-TEST(test_partial_castling) {
+TEST(BoardTest, PartialCastling) {
     Board board;
     board.set_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w Kq - 0 1");
 
@@ -98,7 +74,7 @@ TEST(test_partial_castling) {
     ASSERT_TRUE(cr & BlackQueenSide);
 }
 
-TEST(test_fen_roundtrip) {
+TEST(BoardTest, FenRoundtrip) {
     const char* fens[] = {
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
@@ -115,7 +91,7 @@ TEST(test_fen_roundtrip) {
     }
 }
 
-TEST(test_zobrist_same_position) {
+TEST(BoardTest, ZobristSamePosition) {
     Board b1, b2;
     b1.set_fen(StartFEN);
     b2.set_fen(StartFEN);
@@ -123,7 +99,7 @@ TEST(test_zobrist_same_position) {
     ASSERT_EQ(b1.hash_key(), b2.hash_key());
 }
 
-TEST(test_zobrist_different_positions) {
+TEST(BoardTest, ZobristDifferentPositions) {
     Board b1, b2;
     b1.set_fen(StartFEN);
     b2.set_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
@@ -131,7 +107,7 @@ TEST(test_zobrist_different_positions) {
     ASSERT_TRUE(b1.hash_key() != b2.hash_key());
 }
 
-TEST(test_zobrist_incremental_vs_recompute) {
+TEST(BoardTest, ZobristIncrementalVsRecompute) {
     Board board;
     board.set_fen(StartFEN);
 
@@ -146,7 +122,7 @@ TEST(test_zobrist_incremental_vs_recompute) {
     ASSERT_EQ(board.hash_key(), board.compute_hash());
 }
 
-TEST(test_put_remove_piece) {
+TEST(BoardTest, PutRemovePiece) {
     Board board;
     board.set_fen("8/8/8/8/8/8/8/8 w - - 0 1");
 
@@ -165,7 +141,7 @@ TEST(test_put_remove_piece) {
     ASSERT_TRUE(!(board.all_pieces() & square_bb(D4)));
 }
 
-TEST(test_popcount_lsb) {
+TEST(BoardTest, PopcountLsb) {
     Bitboard b = square_bb(A1) | square_bb(C3) | square_bb(H8);
     ASSERT_EQ(popcount(b), 3);
     ASSERT_EQ(lsb(b), A1);
@@ -175,22 +151,8 @@ TEST(test_popcount_lsb) {
     ASSERT_EQ(popcount(b), 2);
 }
 
-int main() {
-    zobrist::init();
-
-    int prev_failed = 0;
-
-    RUN_TEST(test_start_position);
-    RUN_TEST(test_custom_fen);
-    RUN_TEST(test_partial_castling);
-    RUN_TEST(test_fen_roundtrip);
-    RUN_TEST(test_zobrist_same_position);
-    RUN_TEST(test_zobrist_different_positions);
-    RUN_TEST(test_zobrist_incremental_vs_recompute);
-    RUN_TEST(test_put_remove_piece);
-    RUN_TEST(test_popcount_lsb);
-
-    std::cout << "\n" << tests_passed << " passed, " << tests_failed << " failed.\n";
-
-    return tests_failed > 0 ? 1 : 0;
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::AddGlobalTestEnvironment(new BoardTestEnvironment());
+    return RUN_ALL_TESTS();
 }
