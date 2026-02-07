@@ -222,6 +222,37 @@ MoveList generate_legal(const Board& board) {
     return legal;
 }
 
+bool in_check(const Board& board) {
+    Color us = board.side_to_move();
+    Square kingSq = lsb(board.pieces(us, King));
+    return board.is_square_attacked(kingSq, ~us);
+}
+
+bool is_checkmate(const Board& board) {
+    if (!in_check(board)) return false;
+    return generate_legal(board).size() == 0;
+}
+
+bool is_stalemate(const Board& board) {
+    if (in_check(board)) return false;
+    return generate_legal(board).size() == 0;
+}
+
+bool is_draw_by_fifty_move_rule(const Board& board) {
+    return board.halfmove_clock() >= 100;
+}
+
+GameTermination game_termination(const Board& board) {
+    MoveList legal = generate_legal(board);
+    if (legal.size() == 0) {
+        return in_check(board) ? GameTermination::Checkmate : GameTermination::Stalemate;
+    }
+    if (is_draw_by_fifty_move_rule(board)) {
+        return GameTermination::FiftyMoveRule;
+    }
+    return GameTermination::None;
+}
+
 uint64_t perft(const Board& board, int depth) {
     if (depth == 0) return 1;
 

@@ -313,6 +313,52 @@ TEST(PerftTest, KiwipeteDepth4) {
     EXPECT_EQ(perft(board, 4), 4085603ULL);
 }
 
+// ============================================================
+// Game termination tests
+// ============================================================
+
+TEST(TerminationTest, CheckmateDetection) {
+    Board board;
+    board.set_fen("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1");
+
+    EXPECT_TRUE(in_check(board));
+    EXPECT_TRUE(is_checkmate(board));
+    EXPECT_FALSE(is_stalemate(board));
+    EXPECT_FALSE(is_draw_by_fifty_move_rule(board));
+    EXPECT_EQ(game_termination(board), GameTermination::Checkmate);
+}
+
+TEST(TerminationTest, StalemateDetection) {
+    Board board;
+    board.set_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
+
+    EXPECT_FALSE(in_check(board));
+    EXPECT_FALSE(is_checkmate(board));
+    EXPECT_TRUE(is_stalemate(board));
+    EXPECT_FALSE(is_draw_by_fifty_move_rule(board));
+    EXPECT_EQ(game_termination(board), GameTermination::Stalemate);
+}
+
+TEST(TerminationTest, FiftyMoveRuleDetection) {
+    Board board;
+    board.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 100 1");
+
+    EXPECT_FALSE(is_checkmate(board));
+    EXPECT_FALSE(is_stalemate(board));
+    EXPECT_TRUE(is_draw_by_fifty_move_rule(board));
+    EXPECT_EQ(game_termination(board), GameTermination::FiftyMoveRule);
+}
+
+TEST(TerminationTest, OngoingPosition) {
+    Board board;
+    board.set_fen(StartFEN);
+
+    EXPECT_FALSE(is_checkmate(board));
+    EXPECT_FALSE(is_stalemate(board));
+    EXPECT_FALSE(is_draw_by_fifty_move_rule(board));
+    EXPECT_EQ(game_termination(board), GameTermination::None);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     ::testing::AddGlobalTestEnvironment(new MoveGenTestEnvironment());
