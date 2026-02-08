@@ -1,14 +1,17 @@
 .eval-bar {
-  width: 28px;
-  height: calc(63px * 8 + 4px);
-  border: 2px solid var(--umber);
-  border-right: none;
+  width: 40px;
+  height: calc(72px * 8 + 4px);
+  border: 2px solid var(--gold-dim);
+  border-radius: 3px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative;
   flex-shrink: 0;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+  background: var(--walnut);
+  box-shadow:
+    0 0 0 1px rgba(200, 164, 78, 0.1),
+    0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 .eval-fill-black {
@@ -26,9 +29,9 @@
   left: 50%;
   transform: translateX(-50%);
   font-family: var(--font-mono);
-  font-size: 0.55rem;
-  font-weight: 500;
-  padding: 2px 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 0;
   z-index: 1;
   white-space: nowrap;
   text-align: center;
@@ -36,24 +39,25 @@
 }
 
 .eval-label.top {
-  top: 4px;
-  color: var(--cream-faint);
+  top: 6px;
+  color: var(--cream);
 }
 
 .eval-label.bottom {
-  bottom: 4px;
-  color: #5a4e3a;
+  bottom: 6px;
+  color: #4a3f30;
 }
 
 .eval-label.center {
   top: 50%;
   transform: translate(-50%, -50%);
-  color: var(--gold);
-  font-weight: 600;
-  font-size: 0.6rem;
-  background: var(--walnut);
-  padding: 1px 3px;
-  border-radius: 2px;
+  color: var(--gold-bright);
+  font-weight: 700;
+  font-size: 0.85rem;
+  background: var(--void);
+  padding: 3px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--gold-dim);
 }
 
 /* Pulsing animation while thinking */

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Chessboard } from 'react-chessboard';
 import './ChessBoard.css';
 
-const BOARD_PIXEL_SIZE = 63 * 8;
+const BOARD_PIXEL_SIZE = 72 * 8;
 
 const PROMOTION_LABELS = {
   q: 'Queen',

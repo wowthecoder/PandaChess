@@ -91,7 +91,7 @@ export default function InfoPanel({
         <div className="move-history-header">Moves</div>
         <div className="move-list" ref={moveListRef}>
           {movePairs.length === 0 && (
-            <div style={{ color: 'var(--cream-faint)', fontSize: '0.75rem', fontStyle: 'italic', padding: '0.5rem 0' }}>
+            <div style={{ color: 'var(--cream-faint)', fontSize: '1.2rem', fontStyle: 'italic', padding: '0.5rem 0' }}>
               No moves yet
             </div>
           )}

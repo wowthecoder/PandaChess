@@ -5,18 +5,20 @@
 
 .board-shell {
   position: relative;
-  width: calc(63px * 8 + 4px);
-  height: calc(63px * 8 + 4px);
-  border: 2px solid var(--umber);
+  width: calc(72px * 8 + 4px);
+  height: calc(72px * 8 + 4px);
+  border: 2px solid var(--gold-dim);
+  background: var(--walnut);
   box-shadow:
-    0 8px 40px rgba(0, 0, 0, 0.4),
-    0 2px 8px rgba(0, 0, 0, 0.3);
+    0 0 0 1px rgba(200, 164, 78, 0.1),
+    0 12px 50px rgba(0, 0, 0, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.4);
   overflow: hidden;
 }
 
 .board-react-root {
-  width: calc(63px * 8);
-  height: calc(63px * 8);
+  width: calc(72px * 8);
+  height: calc(72px * 8);
 }
 
 .board-react-root > div {
