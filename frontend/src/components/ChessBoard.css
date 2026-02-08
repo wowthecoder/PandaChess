@@ -1,0 +1,250 @@
+.board-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.board-with-coords {
+  position: relative;
+}
+
+.board-inner {
+  display: flex;
+  flex-direction: column;
+}
+
+.board-rank-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.coord-rank {
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--cream-faint);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.board-file-row {
+  display: flex;
+  padding-top: 3px;
+}
+
+.coord-file {
+  width: 63px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--cream-faint);
+  user-select: none;
+}
+
+/* Individual squares */
+.square {
+  width: 63px;
+  height: 63px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background-color 0.12s ease;
+}
+
+/* First row top border, last row bottom, etc - handled by container */
+.board-rank-row:first-child .square {
+  border-top: 2px solid var(--umber);
+}
+
+.board-rank-row:last-of-type .square {
+  border-bottom: 2px solid var(--umber);
+}
+
+.board-rank-row .square:first-of-type {
+  border-left: 2px solid var(--umber);
+}
+
+.board-rank-row .square:last-child {
+  border-right: 2px solid var(--umber);
+}
+
+.square-light {
+  background-color: var(--board-light);
+}
+
+.square-dark {
+  background-color: var(--board-dark);
+}
+
+/* Selected square */
+.square.selected.square-light {
+  background-color: var(--board-light-selected);
+}
+
+.square.selected.square-dark {
+  background-color: var(--board-dark-selected);
+}
+
+/* Last move highlighting */
+.square.last-move.square-light {
+  background-color: var(--board-light-lastmove);
+}
+
+.square.last-move.square-dark {
+  background-color: var(--board-dark-lastmove);
+}
+
+/* Check highlight */
+.square.in-check.square-light {
+  background:
+    radial-gradient(circle at center, rgba(255, 30, 30, 0.65) 0%, rgba(220, 40, 40, 0.3) 40%, transparent 70%),
+    var(--board-light) !important;
+}
+
+.square.in-check.square-dark {
+  background:
+    radial-gradient(circle at center, rgba(255, 30, 30, 0.65) 0%, rgba(220, 40, 40, 0.3) 40%, transparent 70%),
+    var(--board-dark) !important;
+}
+
+/* Clickable squares */
+.square.clickable {
+  cursor: pointer;
+}
+
+.square.legal-target.clickable:hover.square-light {
+  background-color: var(--board-light-selected);
+}
+
+.square.legal-target.clickable:hover.square-dark {
+  background-color: var(--board-dark-selected);
+}
+
+/* Piece rendering */
+.piece {
+  font-size: 3.2rem;
+  line-height: 1;
+  pointer-events: none;
+  position: relative;
+  z-index: 2;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.piece-w {
+  color: #f0e8d0;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.piece-b {
+  color: #1e1810;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+  -webkit-text-stroke: 0.3px rgba(255, 255, 255, 0.06);
+}
+
+/* Hover effect on own pieces */
+.square.own-piece.clickable:hover .piece {
+  transform: scale(1.12);
+  filter:
+    drop-shadow(0 0 10px rgba(200, 164, 78, 0.5))
+    drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
+}
+
+/* Legal move dot (empty squares) */
+.legal-dot {
+  position: absolute;
+  width: 26%;
+  height: 26%;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Legal capture ring (squares with enemy pieces) */
+.capture-ring {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 5px solid rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Promotion dialog */
+.promotion-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+
+.promotion-dialog {
+  display: flex;
+  gap: 4px;
+  background: var(--walnut);
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  padding: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+
+.promotion-option {
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s ease;
+}
+
+.promotion-option:hover {
+  background: rgba(200, 164, 78, 0.15);
+}
+
+.promotion-option .piece {
+  font-size: 2.6rem;
+  pointer-events: none;
+}
+
+/* Thinking overlay shimmer */
+@keyframes thinkingShimmer {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.board-with-coords.thinking::after {
+  content: '';
+  position: absolute;
+  left: 22px;
+  top: 0;
+  width: calc(63px * 8 + 4px);
+  height: calc(63px * 8 + 4px);
+  background: rgba(200, 164, 78, 0.03);
+  pointer-events: none;
+  animation: thinkingShimmer 2s ease-in-out infinite;
+  z-index: 10;
+}
+
+/* Board border shadow */
+.board-rank-row:first-child .square:first-of-type {
+  box-shadow: -2px -2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.board-inner {
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.3);
+  display: inline-flex;
+  flex-direction: column;
+}

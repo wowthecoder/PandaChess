@@ -1,0 +1,67 @@
+.eval-bar {
+  width: 28px;
+  height: calc(63px * 8 + 4px);
+  border: 2px solid var(--umber);
+  border-right: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+}
+
+.eval-fill-black {
+  background: #1e1810;
+  transition: flex 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.eval-fill-white {
+  background: linear-gradient(180deg, #f0e8d0, #e0d5b8);
+  transition: flex 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.eval-label {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  padding: 2px 0;
+  z-index: 1;
+  white-space: nowrap;
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+
+.eval-label.top {
+  top: 4px;
+  color: var(--cream-faint);
+}
+
+.eval-label.bottom {
+  bottom: 4px;
+  color: #5a4e3a;
+}
+
+.eval-label.center {
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--gold);
+  font-weight: 600;
+  font-size: 0.6rem;
+  background: var(--walnut);
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+
+/* Pulsing animation while thinking */
+@keyframes evalPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.eval-bar.pulsing .eval-label {
+  animation: evalPulse 1.5s ease-in-out infinite;
+}

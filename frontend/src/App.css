@@ -1,0 +1,106 @@
+.app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(200, 164, 78, 0.03) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(120, 90, 40, 0.04) 0%, transparent 50%),
+    var(--obsidian);
+  overflow: hidden;
+}
+
+/* Header bar */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--walnut-light);
+  background: var(--walnut);
+  flex-shrink: 0;
+}
+
+.app-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.app-logo-icon {
+  font-size: 1.25rem;
+}
+
+.app-logo h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.app-logo-tag {
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  color: var(--cream-faint);
+  font-style: italic;
+  font-weight: 300;
+}
+
+/* Main game layout */
+.game-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  min-height: 0;
+}
+
+.board-area {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+/* Player labels above/below board */
+.player-labels {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.player-label {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--cream-dim);
+  padding: 0.3rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.player-label .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.player-label .dot.white {
+  background: var(--cream);
+  border: 1px solid var(--cream-dim);
+}
+
+.player-label .dot.black {
+  background: #2a2218;
+  border: 1px solid var(--cream-faint);
+}
+
+.player-label.active {
+  color: var(--gold);
+  font-weight: 500;
+}
