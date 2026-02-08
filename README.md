@@ -1,9 +1,9 @@
 # PandaChess
 Experiments for chess engine 
 
-# Testing 
+# Engine Testing 
 ```
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
+cmake -S engine -B engine/build
+cmake --build engine/build
+ctest --test-dir engine/build --output-on-failure
 ```
