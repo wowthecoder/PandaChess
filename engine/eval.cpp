@@ -4,16 +4,6 @@
 
 namespace panda {
 
-// Material values in centipawns
-constexpr int PieceValue[6] = {
-    100,  // Pawn
-    320,  // Knight
-    330,  // Bishop
-    500,  // Rook
-    900,  // Queen
-    0     // King (not counted in material)
-};
-
 // Piece-square tables (from white's perspective, A1=index 0)
 // Mirrored for black by flipping rank.
 

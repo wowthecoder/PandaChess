@@ -3,7 +3,8 @@ Experiments for chess engine
 
 # Engine Testing 
 ```
-cmake -S engine -B engine/build
-cmake --build engine/build
-ctest --test-dir engine/build --output-on-failure
+cd engine
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```

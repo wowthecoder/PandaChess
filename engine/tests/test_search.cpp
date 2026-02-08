@@ -7,6 +7,7 @@
 #include "../tt.h"
 #include "../zobrist.h"
 #include <gtest/gtest.h>
+#include <chrono>
 
 using namespace panda;
 
@@ -71,7 +72,6 @@ TEST(EvalTest, StartPositionSymmetric) {
 }
 
 TEST(EvalTest, MaterialAdvantage) {
-    // White has an extra queen
     Board board;
     board.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     int baseScore = evaluate(board);
@@ -90,14 +90,11 @@ TEST(EvalTest, MaterialAdvantage) {
 // ============================================================
 
 TEST(SearchTest, MateIn1_BackRankMate) {
-    // White to move, Qh7# is mate in 1
-    // Position: Black king on g8, white queen on h1, white king on a1
-    // Simplified: 6k1/5ppp/8/8/8/8/8/K6Q w - - 0 1
     Board board;
     board.set_fen("6k1/5ppp/8/8/8/8/8/K6Q w - - 0 1");
 
     TranspositionTable tt(1);
-    SearchResult result = search(board, 3, tt);
+    SearchResult result = searchDepth(board, 3, tt);
 
     // The best move should deliver checkmate
     Board after = board;
@@ -107,12 +104,11 @@ TEST(SearchTest, MateIn1_BackRankMate) {
 }
 
 TEST(SearchTest, MateIn1_ScholarsMate) {
-    // White to move, Qxf7# is mate
     Board board;
     board.set_fen("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4");
 
     TranspositionTable tt(1);
-    SearchResult result = search(board, 3, tt);
+    SearchResult result = searchDepth(board, 3, tt);
 
     Board after = board;
     after.make_move(result.bestMove);
@@ -130,7 +126,7 @@ TEST(SearchTest, MateIn2) {
     board.set_fen("kbK5/pp6/1P6/8/8/8/8/R7 w - - 0 1");
 
     TranspositionTable tt(1);
-    SearchResult result = search(board, 5, tt);
+    SearchResult result = searchDepth(board, 5, tt);
 
     // Should find a forced mate
     EXPECT_GT(result.score, MATE_SCORE - 100);
@@ -141,16 +137,11 @@ TEST(SearchTest, MateIn2) {
 // ============================================================
 
 TEST(SearchTest, AvoidStalemate) {
-    // White is up huge material but must not stalemate
-    // K7/8/1Q6/8/8/8/8/7k w - - 0 1
-    // White queen on b6, white king a8, black king h1
-    // Qb1+ would be stalemate if black had no moves after... but let's use a cleaner position
-    // Better: Kf6, Qg5, black king h8 — Qg7 would be stalemate
     Board board;
     board.set_fen("7k/8/5K2/6Q1/8/8/8/8 w - - 0 1");
 
     TranspositionTable tt(1);
-    SearchResult result = search(board, 4, tt);
+    SearchResult result = searchDepth(board, 4, tt);
 
     // Should not play Qg7 (stalemate). Should find checkmate instead.
     Board after = board;
@@ -169,9 +160,42 @@ TEST(SearchTest, StartPositionReturnsMove) {
     board.set_fen(StartFEN);
 
     TranspositionTable tt(1);
-    SearchResult result = search(board, 4, tt);
+    SearchResult result = searchDepth(board, 4, tt);
 
     EXPECT_NE(result.bestMove, NullMove);
+}
+
+// ============================================================
+// Iterative deepening with time limit
+// ============================================================
+
+TEST(SearchTest, IterativeDeepeningReturnsMove) {
+    Board board;
+    board.set_fen(StartFEN);
+
+    TranspositionTable tt(1);
+    auto start = std::chrono::steady_clock::now();
+    SearchResult result = search(board, 500, tt); // 500ms time limit
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    EXPECT_NE(result.bestMove, NullMove);
+    // Should complete within reasonable time (allow some overhead)
+    EXPECT_LT(elapsed, 2000);
+}
+
+TEST(SearchTest, IterativeDeepeningFindsMate) {
+    // Mate in 1 should be found almost instantly
+    Board board;
+    board.set_fen("6k1/5ppp/8/8/8/8/8/K6Q w - - 0 1");
+
+    TranspositionTable tt(1);
+    SearchResult result = search(board, 5000, tt); // generous time
+
+    Board after = board;
+    after.make_move(result.bestMove);
+    EXPECT_TRUE(is_checkmate(after));
+    EXPECT_GT(result.score, MATE_SCORE - 100);
 }
 
 int main(int argc, char** argv) {
