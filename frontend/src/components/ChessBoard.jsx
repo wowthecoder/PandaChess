@@ -1,16 +1,36 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
+import { Chessboard } from 'react-chessboard';
 import './ChessBoard.css';
 
-const PIECE_SYMBOLS = {
-  k: { w: '\u2654', b: '\u265A' },
-  q: { w: '\u2655', b: '\u265B' },
-  r: { w: '\u2656', b: '\u265C' },
-  b: { w: '\u2657', b: '\u265D' },
-  n: { w: '\u2658', b: '\u265E' },
-  p: { w: '\u2659', b: '\u265F' },
+const BOARD_PIXEL_SIZE = 63 * 8;
+
+const PROMOTION_LABELS = {
+  q: 'Queen',
+  r: 'Rook',
+  b: 'Bishop',
+  n: 'Knight',
 };
 
-const FILES = 'abcdefgh';
+function isLightSquare(square) {
+  const fileIndex = square.charCodeAt(0) - 97;
+  const rankIndex = parseInt(square[1], 10) - 1;
+  return (fileIndex + rankIndex) % 2 === 1;
+}
+
+function squareBaseColor(square, selectedSquare, lastMove) {
+  const light = isLightSquare(square);
+  if (selectedSquare === square) {
+    return light ? 'var(--board-light-selected)' : 'var(--board-dark-selected)';
+  }
+  if (lastMove && (lastMove.from === square || lastMove.to === square)) {
+    return light ? 'var(--board-light-lastmove)' : 'var(--board-dark-lastmove)';
+  }
+  return light ? 'var(--board-light)' : 'var(--board-dark)';
+}
+
+function squareNaturalColor(square) {
+  return isLightSquare(square) ? 'var(--board-light)' : 'var(--board-dark)';
+}
 
 export default function ChessBoard({
   game,
@@ -24,19 +44,7 @@ export default function ChessBoard({
   promotionPending,
   onPromotionSelect,
 }) {
-  const [hoveredSquare, setHoveredSquare] = useState(null);
-
   const isFlipped = playerColor === 'b';
-
-  const ranks = useMemo(
-    () => (isFlipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1]),
-    [isFlipped]
-  );
-
-  const files = useMemo(
-    () => (isFlipped ? FILES.split('').reverse() : FILES.split('')),
-    [isFlipped]
-  );
 
   const legalTargetSet = useMemo(
     () => new Set(legalMoves.map((m) => m.to)),
@@ -72,89 +80,88 @@ export default function ChessBoard({
   }, [isInCheck, game, turnColor]);
 
   const isInteractive = !isThinking && !isGameOver;
+  const position = game.fen();
 
-  const getSquareClasses = (sq) => {
-    const fi = sq.charCodeAt(0) - 97;
-    const ri = parseInt(sq[1]) - 1;
-    const isLight = (fi + ri) % 2 === 1;
-    const piece = game.get(sq);
-    const isOwnPiece = piece && piece.color === playerColor;
-    const isLegalTarget = legalTargetSet.has(sq);
+  const customSquareStyles = useMemo(() => {
+    const styles = {};
+    const trackedSquares = new Set(legalTargetSet);
+    if (selectedSquare) trackedSquares.add(selectedSquare);
+    if (kingSquare) trackedSquares.add(kingSquare);
+    if (lastMove) {
+      trackedSquares.add(lastMove.from);
+      trackedSquares.add(lastMove.to);
+    }
 
-    let cls = `square ${isLight ? 'square-light' : 'square-dark'}`;
-    if (selectedSquare === sq) cls += ' selected';
-    if (lastMove && (lastMove.from === sq || lastMove.to === sq)) cls += ' last-move';
-    if (kingSquare === sq) cls += ' in-check';
-    if (isLegalTarget) cls += ' legal-target';
-    if (isOwnPiece) cls += ' own-piece';
-    if (isInteractive && (isOwnPiece || isLegalTarget)) cls += ' clickable';
+    for (const square of trackedSquares) {
+      const layers = [];
+      const baseColor =
+        kingSquare === square
+          ? squareNaturalColor(square)
+          : squareBaseColor(square, selectedSquare, lastMove);
 
-    return cls;
-  };
+      if (kingSquare === square) {
+        layers.push(
+          'radial-gradient(circle at center, rgba(255, 30, 30, 0.65) 0%, rgba(220, 40, 40, 0.3) 40%, transparent 70%)'
+        );
+      }
 
-  const handleClick = (sq) => {
+      if (legalTargetSet.has(square)) {
+        if (captureTargetSet.has(square)) {
+          layers.push(
+            'radial-gradient(circle at center, transparent 54%, rgba(0, 0, 0, 0.22) 56%, rgba(0, 0, 0, 0.22) 68%, transparent 70%)'
+          );
+        } else {
+          layers.push(
+            'radial-gradient(circle at center, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0.22) 16%, transparent 18%)'
+          );
+        }
+      }
+
+      styles[square] = {
+        background: layers.length > 0 ? `${layers.join(', ')}, ${baseColor}` : baseColor,
+      };
+    }
+
+    return styles;
+  }, [captureTargetSet, kingSquare, lastMove, legalTargetSet, selectedSquare]);
+
+  const handleSquareClick = (square) => {
     if (!isInteractive) return;
-    onSquareClick(sq);
+    onSquareClick(square);
   };
 
   return (
     <div className="board-container">
-      <div className={`board-with-coords ${isThinking ? 'thinking' : ''}`}>
-        {/* Board grid with inline rank labels */}
-        <div className="board-inner">
-          {ranks.map((rank, ri) => (
-            <div key={rank} className="board-rank-row">
-              <span className="coord-rank">{rank}</span>
-              {files.map((file) => {
-                const sq = `${file}${rank}`;
-                const piece = game.get(sq);
-                const isLegal = legalTargetSet.has(sq);
-                const isCapture = captureTargetSet.has(sq);
-
-                return (
-                  <div
-                    key={sq}
-                    className={getSquareClasses(sq)}
-                    onClick={() => handleClick(sq)}
-                    onMouseEnter={() => setHoveredSquare(sq)}
-                    onMouseLeave={() => setHoveredSquare(null)}
-                  >
-                    {piece && (
-                      <span className={`piece piece-${piece.color}`}>
-                        {PIECE_SYMBOLS[piece.type][piece.color]}
-                      </span>
-                    )}
-                    {isLegal && !isCapture && !piece && <div className="legal-dot" />}
-                    {isLegal && (isCapture || piece) && <div className="capture-ring" />}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-
-          {/* File labels */}
-          <div className="board-file-row">
-            <span className="coord-rank" />
-            {files.map((f) => (
-              <span key={f} className="coord-file">{f}</span>
-            ))}
-          </div>
+      <div className={`board-shell ${isThinking ? 'thinking' : ''}`}>
+        <div className="board-react-root">
+          <Chessboard
+            id="panda-chessboard"
+            position={position}
+            boardWidth={BOARD_PIXEL_SIZE}
+            boardOrientation={isFlipped ? 'black' : 'white'}
+            arePiecesDraggable={false}
+            onSquareClick={handleSquareClick}
+            showBoardNotation
+            customSquareStyles={customSquareStyles}
+            customLightSquareStyle={{ backgroundColor: 'var(--board-light)' }}
+            customDarkSquareStyle={{ backgroundColor: 'var(--board-dark)' }}
+            customBoardStyle={{ boxShadow: 'none' }}
+          />
         </div>
 
-        {/* Promotion dialog */}
         {promotionPending && (
           <div className="promotion-overlay">
             <div className="promotion-dialog">
-              {['q', 'r', 'b', 'n'].map((p) => (
-                <div
-                  key={p}
+              {['q', 'r', 'b', 'n'].map((piece) => (
+                <button
+                  type="button"
+                  key={piece}
                   className="promotion-option"
-                  onClick={() => onPromotionSelect(p)}
+                  onClick={() => onPromotionSelect(piece)}
                 >
-                  <span className={`piece piece-${playerColor}`}>
-                    {PIECE_SYMBOLS[p][playerColor]}
-                  </span>
-                </div>
+                  <span className="promotion-piece-code">{piece.toUpperCase()}</span>
+                  <span className="promotion-piece-label">{PROMOTION_LABELS[piece]}</span>
+                </button>
               ))}
             </div>
           </div>
