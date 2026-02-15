@@ -1,14 +1,15 @@
+#include <gtest/gtest.h>
+
 #include "../attacks.h"
 #include "../board.h"
 #include "../move.h"
 #include "../movegen.h"
 #include "../zobrist.h"
-#include <gtest/gtest.h>
 
 using namespace panda;
 
 class MoveGenTestEnvironment : public ::testing::Environment {
-public:
+   public:
     void SetUp() override {
         zobrist::init();
         attacks::init();
@@ -99,8 +100,8 @@ TEST(AttackTest, BishopAttacksWithBlockers) {
     // Bishop on E4, blocker on F5
     Bitboard occ = square_bb(F5);
     Bitboard atk = attacks::bishop_attacks(E4, occ);
-    EXPECT_TRUE(atk & square_bb(F5));    // Can capture blocker
-    EXPECT_FALSE(atk & square_bb(G6));   // Blocked beyond
+    EXPECT_TRUE(atk & square_bb(F5));   // Can capture blocker
+    EXPECT_FALSE(atk & square_bb(G6));  // Blocked beyond
 }
 
 TEST(AttackTest, RookAttacksEmpty) {
@@ -114,9 +115,9 @@ TEST(AttackTest, RookAttacksWithBlockers) {
     // Rook on E4, blocker on E6
     Bitboard occ = square_bb(E6);
     Bitboard atk = attacks::rook_attacks(E4, occ);
-    EXPECT_TRUE(atk & square_bb(E6));    // Can capture blocker
-    EXPECT_FALSE(atk & square_bb(E7));   // Blocked beyond
-    EXPECT_TRUE(atk & square_bb(E1));    // Not blocked other direction
+    EXPECT_TRUE(atk & square_bb(E6));   // Can capture blocker
+    EXPECT_FALSE(atk & square_bb(E7));  // Blocked beyond
+    EXPECT_TRUE(atk & square_bb(E1));   // Not blocked other direction
 }
 
 // ============================================================
@@ -246,7 +247,8 @@ TEST(MakeMoveTest, CastlingRightsRookCapture) {
     board.set_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K1NR w KQkq - 0 1");
 
     // Move to a position where we can actually test rook capture affecting castling
-    // Let's use a direct scenario: white rook captures black rook on H8 (not realistic but tests the table)
+    // Let's use a direct scenario: white rook captures black rook on H8 (not realistic but tests
+    // the table)
     board.set_fen("r3k2R/pppppppp/8/8/8/8/PPPPPPPP/R3K3 b Qq - 0 1");
 
     // Black's kingside castling should already be gone since H8 has white rook
@@ -287,7 +289,8 @@ TEST(PerftTest, StartPositionDepth5) {
     EXPECT_EQ(perft(board, 5), 4865609ULL);
 }
 
-constexpr const char* KiwipeteFEN = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -";
+constexpr const char* KiwipeteFEN =
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -";
 
 TEST(PerftTest, KiwipeteDepth1) {
     Board board;

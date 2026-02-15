@@ -1,4 +1,5 @@
 #include "movegen.h"
+
 #include "attacks.h"
 
 namespace panda {
@@ -20,9 +21,8 @@ static void generate_pawn_moves(const Board& board, MoveList& moves) {
     singlePush &= ~occ;
 
     // Double push
-    Bitboard doublePush = (us == White)
-        ? ((singlePush & RankMask[2]) << 8)
-        : ((singlePush & RankMask[5]) >> 8);
+    Bitboard doublePush =
+        (us == White) ? ((singlePush & RankMask[2]) << 8) : ((singlePush & RankMask[5]) >> 8);
     doublePush &= ~occ;
 
     // Non-promotion single pushes
@@ -56,10 +56,10 @@ static void generate_pawn_moves(const Board& board, MoveList& moves) {
     // Left captures
     Bitboard leftCap, rightCap;
     if (us == White) {
-        leftCap  = (pawns & ~FileMask[0]) << 7;
+        leftCap = (pawns & ~FileMask[0]) << 7;
         rightCap = (pawns & ~FileMask[7]) << 9;
     } else {
-        leftCap  = (pawns & ~FileMask[7]) >> 7;
+        leftCap = (pawns & ~FileMask[7]) >> 7;
         rightCap = (pawns & ~FileMask[0]) >> 9;
     }
 
@@ -169,32 +169,24 @@ static void generate_piece_moves(const Board& board, MoveList& moves) {
     Color them = ~us;
     CastlingRights cr = board.castling_rights();
     if (us == White) {
-        if ((cr & WhiteKingSide) &&
-            !(occ & (square_bb(F1) | square_bb(G1))) &&
-            !board.is_square_attacked(E1, them) &&
-            !board.is_square_attacked(F1, them) &&
+        if ((cr & WhiteKingSide) && !(occ & (square_bb(F1) | square_bb(G1))) &&
+            !board.is_square_attacked(E1, them) && !board.is_square_attacked(F1, them) &&
             !board.is_square_attacked(G1, them)) {
             moves.add(make_move(E1, G1, Castling));
         }
-        if ((cr & WhiteQueenSide) &&
-            !(occ & (square_bb(B1) | square_bb(C1) | square_bb(D1))) &&
-            !board.is_square_attacked(E1, them) &&
-            !board.is_square_attacked(D1, them) &&
+        if ((cr & WhiteQueenSide) && !(occ & (square_bb(B1) | square_bb(C1) | square_bb(D1))) &&
+            !board.is_square_attacked(E1, them) && !board.is_square_attacked(D1, them) &&
             !board.is_square_attacked(C1, them)) {
             moves.add(make_move(E1, C1, Castling));
         }
     } else {
-        if ((cr & BlackKingSide) &&
-            !(occ & (square_bb(F8) | square_bb(G8))) &&
-            !board.is_square_attacked(E8, them) &&
-            !board.is_square_attacked(F8, them) &&
+        if ((cr & BlackKingSide) && !(occ & (square_bb(F8) | square_bb(G8))) &&
+            !board.is_square_attacked(E8, them) && !board.is_square_attacked(F8, them) &&
             !board.is_square_attacked(G8, them)) {
             moves.add(make_move(E8, G8, Castling));
         }
-        if ((cr & BlackQueenSide) &&
-            !(occ & (square_bb(B8) | square_bb(C8) | square_bb(D8))) &&
-            !board.is_square_attacked(E8, them) &&
-            !board.is_square_attacked(D8, them) &&
+        if ((cr & BlackQueenSide) && !(occ & (square_bb(B8) | square_bb(C8) | square_bb(D8))) &&
+            !board.is_square_attacked(E8, them) && !board.is_square_attacked(D8, them) &&
             !board.is_square_attacked(C8, them)) {
             moves.add(make_move(E8, C8, Castling));
         }
@@ -229,12 +221,14 @@ bool in_check(const Board& board) {
 }
 
 bool is_checkmate(const Board& board) {
-    if (!in_check(board)) return false;
+    if (!in_check(board))
+        return false;
     return generate_legal(board).size() == 0;
 }
 
 bool is_stalemate(const Board& board) {
-    if (in_check(board)) return false;
+    if (in_check(board))
+        return false;
     return generate_legal(board).size() == 0;
 }
 
@@ -254,11 +248,13 @@ GameTermination game_termination(const Board& board) {
 }
 
 uint64_t perft(const Board& board, int depth) {
-    if (depth == 0) return 1;
+    if (depth == 0)
+        return 1;
 
     MoveList moves = generate_legal(board);
 
-    if (depth == 1) return moves.size();
+    if (depth == 1)
+        return moves.size();
 
     uint64_t nodes = 0;
     for (int i = 0; i < moves.size(); ++i) {
@@ -269,4 +265,4 @@ uint64_t perft(const Board& board, int depth) {
     return nodes;
 }
 
-} // namespace panda
+}  // namespace panda

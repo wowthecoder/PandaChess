@@ -1,8 +1,9 @@
 #pragma once
 
-#include "types.h"
-#include "bitboard.h"
 #include <cstdint>
+
+#include "bitboard.h"
+#include "types.h"
 
 namespace panda {
 namespace attacks {
@@ -14,10 +15,10 @@ extern Bitboard KingAttacks[64];
 
 // Magic bitboard structures for sliding pieces
 struct Magic {
-    Bitboard  mask;
-    Bitboard  magic;
+    Bitboard mask;
+    Bitboard magic;
     Bitboard* attacks;
-    int       shift;
+    int shift;
 
     Bitboard operator()(Bitboard occ) const {
         return attacks[((occ & mask) * magic) >> shift];
@@ -31,9 +32,15 @@ extern Bitboard BishopTable[0x1480];
 extern Bitboard RookTable[0x19000];
 
 // Lookup functions
-inline Bitboard pawn_attacks(Color c, Square s) { return PawnAttacks[c][s]; }
-inline Bitboard knight_attacks(Square s) { return KnightAttacks[s]; }
-inline Bitboard king_attacks(Square s) { return KingAttacks[s]; }
+inline Bitboard pawn_attacks(Color c, Square s) {
+    return PawnAttacks[c][s];
+}
+inline Bitboard knight_attacks(Square s) {
+    return KnightAttacks[s];
+}
+inline Bitboard king_attacks(Square s) {
+    return KingAttacks[s];
+}
 Bitboard bishop_attacks(Square s, Bitboard occ);
 Bitboard rook_attacks(Square s, Bitboard occ);
 inline Bitboard queen_attacks(Square s, Bitboard occ) {
@@ -42,5 +49,5 @@ inline Bitboard queen_attacks(Square s, Bitboard occ) {
 
 void init();
 
-} // namespace attacks
-} // namespace panda
+}  // namespace attacks
+}  // namespace panda

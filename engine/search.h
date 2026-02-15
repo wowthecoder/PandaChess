@@ -1,10 +1,11 @@
 #pragma once
 
+#include <chrono>
+#include <cstring>
+
 #include "board.h"
 #include "move.h"
 #include "tt.h"
-#include <chrono>
-#include <cstring>
 
 namespace panda {
 
@@ -18,8 +19,8 @@ struct SearchResult {
 
 struct SearchState {
     TranspositionTable& tt;
-    Move killers[MAX_PLY][2];        // 2 killer moves per ply
-    int history[2][64][64];          // [color][from][to] history scores
+    Move killers[MAX_PLY][2];  // 2 killer moves per ply
+    int history[2][64][64];    // [color][from][to] history scores
     std::chrono::steady_clock::time_point startTime;
     int timeLimitMs;
     bool stopped;
@@ -35,9 +36,11 @@ struct SearchState {
     }
 
     bool checkTime() {
-        if (timeLimitMs <= 0) return false;
+        if (timeLimitMs <= 0)
+            return false;
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
         if (elapsed >= timeLimitMs) {
             stopped = true;
             return true;
@@ -52,4 +55,4 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
 // Fixed-depth search (for tests, backward compatibility)
 SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt);
 
-} // namespace panda
+}  // namespace panda

@@ -1,27 +1,49 @@
 #include "board.h"
+
+#include <cassert>
+#include <sstream>
+
 #include "attacks.h"
 #include "zobrist.h"
-#include <sstream>
-#include <cassert>
 
 namespace panda {
 
 // Map piece chars to Piece enum
 static Piece char_to_piece(char c) {
     switch (c) {
-        case 'P': return WhitePawn;   case 'N': return WhiteKnight;
-        case 'B': return WhiteBishop; case 'R': return WhiteRook;
-        case 'Q': return WhiteQueen;  case 'K': return WhiteKing;
-        case 'p': return BlackPawn;   case 'n': return BlackKnight;
-        case 'b': return BlackBishop; case 'r': return BlackRook;
-        case 'q': return BlackQueen;  case 'k': return BlackKing;
-        default:  return NoPiece;
+        case 'P':
+            return WhitePawn;
+        case 'N':
+            return WhiteKnight;
+        case 'B':
+            return WhiteBishop;
+        case 'R':
+            return WhiteRook;
+        case 'Q':
+            return WhiteQueen;
+        case 'K':
+            return WhiteKing;
+        case 'p':
+            return BlackPawn;
+        case 'n':
+            return BlackKnight;
+        case 'b':
+            return BlackBishop;
+        case 'r':
+            return BlackRook;
+        case 'q':
+            return BlackQueen;
+        case 'k':
+            return BlackKing;
+        default:
+            return NoPiece;
     }
 }
 
 static char piece_to_char(Piece p) {
     constexpr const char* chars = "PNBRQKpnbrqk";
-    if (p < PieceCount) return chars[p];
+    if (p < PieceCount)
+        return chars[p];
     return '.';
 }
 
@@ -102,11 +124,20 @@ void Board::set_fen(const std::string& fen) {
     castling = NoCastling;
     for (char c : token) {
         switch (c) {
-            case 'K': castling |= WhiteKingSide;  break;
-            case 'Q': castling |= WhiteQueenSide; break;
-            case 'k': castling |= BlackKingSide;   break;
-            case 'q': castling |= BlackQueenSide;  break;
-            default: break;
+            case 'K':
+                castling |= WhiteKingSide;
+                break;
+            case 'Q':
+                castling |= WhiteQueenSide;
+                break;
+            case 'k':
+                castling |= BlackKingSide;
+                break;
+            case 'q':
+                castling |= BlackQueenSide;
+                break;
+            default:
+                break;
         }
     }
 
@@ -121,9 +152,11 @@ void Board::set_fen(const std::string& fen) {
     }
 
     // 5. Halfmove clock
-    if (ss >> token) halfmoveClock = std::stoi(token);
+    if (ss >> token)
+        halfmoveClock = std::stoi(token);
     // 6. Fullmove number
-    if (ss >> token) fullmoveNumber = std::stoi(token);
+    if (ss >> token)
+        fullmoveNumber = std::stoi(token);
 
     // Rebuild hash to include castling, EP, and side
     hash ^= zobrist::castlingKeys[castling];
@@ -144,12 +177,17 @@ std::string Board::to_fen() const {
             if (p == NoPiece) {
                 empty++;
             } else {
-                if (empty > 0) { fen << empty; empty = 0; }
+                if (empty > 0) {
+                    fen << empty;
+                    empty = 0;
+                }
                 fen << piece_to_char(p);
             }
         }
-        if (empty > 0) fen << empty;
-        if (rank > 0) fen << '/';
+        if (empty > 0)
+            fen << empty;
+        if (rank > 0)
+            fen << '/';
     }
 
     // 2. Side to move
@@ -160,10 +198,14 @@ std::string Board::to_fen() const {
     if (castling == NoCastling) {
         fen << '-';
     } else {
-        if (castling & WhiteKingSide)  fen << 'K';
-        if (castling & WhiteQueenSide) fen << 'Q';
-        if (castling & BlackKingSide)  fen << 'k';
-        if (castling & BlackQueenSide) fen << 'q';
+        if (castling & WhiteKingSide)
+            fen << 'K';
+        if (castling & WhiteQueenSide)
+            fen << 'Q';
+        if (castling & BlackKingSide)
+            fen << 'k';
+        if (castling & BlackQueenSide)
+            fen << 'q';
     }
 
     // 4. En passant
@@ -216,38 +258,95 @@ std::string Board::print() const {
 
 bool Board::is_square_attacked(Square s, Color attacker) const {
     Bitboard occ = all_pieces();
-    if (attacks::pawn_attacks(~attacker, s) & pieces(attacker, Pawn))   return true;
-    if (attacks::knight_attacks(s) & pieces(attacker, Knight))          return true;
-    if (attacks::king_attacks(s) & pieces(attacker, King))              return true;
-    if (attacks::bishop_attacks(s, occ) & (pieces(attacker, Bishop) | pieces(attacker, Queen))) return true;
-    if (attacks::rook_attacks(s, occ) & (pieces(attacker, Rook) | pieces(attacker, Queen)))     return true;
+    if (attacks::pawn_attacks(~attacker, s) & pieces(attacker, Pawn))
+        return true;
+    if (attacks::knight_attacks(s) & pieces(attacker, Knight))
+        return true;
+    if (attacks::king_attacks(s) & pieces(attacker, King))
+        return true;
+    if (attacks::bishop_attacks(s, occ) & (pieces(attacker, Bishop) | pieces(attacker, Queen)))
+        return true;
+    if (attacks::rook_attacks(s, occ) & (pieces(attacker, Rook) | pieces(attacker, Queen)))
+        return true;
     return false;
 }
 
 // Castling rights update table: indexed by square, gives mask to AND with castling rights
 static constexpr CastlingRights CastlingUpdate[64] = {
     // A1                                                           H1
-    CastlingRights(~WhiteQueenSide & 0xF), AllCastling, AllCastling, AllCastling,
-    CastlingRights(~(WhiteKingSide | WhiteQueenSide) & 0xF), AllCastling, AllCastling,
+    CastlingRights(~WhiteQueenSide & 0xF),
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    CastlingRights(~(WhiteKingSide | WhiteQueenSide) & 0xF),
+    AllCastling,
+    AllCastling,
     CastlingRights(~WhiteKingSide & 0xF),
     // A2-H2 through A7-H7
-    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
-    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
-    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
-    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
-    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
-    AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling, AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    AllCastling,
     // A8                                                           H8
-    CastlingRights(~BlackQueenSide & 0xF), AllCastling, AllCastling, AllCastling,
-    CastlingRights(~(BlackKingSide | BlackQueenSide) & 0xF), AllCastling, AllCastling,
+    CastlingRights(~BlackQueenSide & 0xF),
+    AllCastling,
+    AllCastling,
+    AllCastling,
+    CastlingRights(~(BlackKingSide | BlackQueenSide) & 0xF),
+    AllCastling,
+    AllCastling,
     CastlingRights(~BlackKingSide & 0xF),
 };
 
 void Board::make_move(Move m) {
     Square from = move_from(m);
-    Square to   = move_to(m);
+    Square to = move_to(m);
     MoveType mt = move_type(m);
-    Piece moved  = mailbox[from];
+    Piece moved = mailbox[from];
     Piece captured = mailbox[to];
     Color us = sideToMove;
 
@@ -272,12 +371,12 @@ void Board::make_move(Move m) {
         put_piece(moved, to);
         // Move rook
         Square rookFrom, rookTo;
-        if (to > from) { // Kingside
+        if (to > from) {  // Kingside
             rookFrom = make_square(7, square_rank(from));
-            rookTo   = make_square(5, square_rank(from));
-        } else { // Queenside
+            rookTo = make_square(5, square_rank(from));
+        } else {  // Queenside
             rookFrom = make_square(0, square_rank(from));
-            rookTo   = make_square(3, square_rank(from));
+            rookTo = make_square(3, square_rank(from));
         }
         Piece rook = mailbox[rookFrom];
         remove_piece(rookFrom);
@@ -286,7 +385,8 @@ void Board::make_move(Move m) {
     } else if (mt == Promotion) {
         PieceType promoPt = promotion_type(m);
         Piece promoPiece = make_piece(us, promoPt);
-        if (captured != NoPiece) remove_piece(to);
+        if (captured != NoPiece)
+            remove_piece(to);
         remove_piece(from);
         put_piece(promoPiece, to);
         halfmoveClock = 0;
@@ -314,7 +414,8 @@ void Board::make_move(Move m) {
     castling &= CastlingUpdate[to];
 
     // Update fullmove number
-    if (us == Black) fullmoveNumber++;
+    if (us == Black)
+        fullmoveNumber++;
 
     // Switch side
     sideToMove = ~us;
@@ -337,4 +438,4 @@ void Board::make_null_move() {
     halfmoveClock++;
 }
 
-} // namespace panda
+}  // namespace panda

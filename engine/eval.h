@@ -18,4 +18,4 @@ inline constexpr int PieceValue[6] = {
 // Positive = good for side to move.
 int evaluate(const Board& board);
 
-} // namespace panda
+}  // namespace panda

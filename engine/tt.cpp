@@ -41,4 +41,4 @@ void TranspositionTable::clear() {
     }
 }
 
-} // namespace panda
+}  // namespace panda

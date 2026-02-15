@@ -1,13 +1,15 @@
+#include <gtest/gtest.h>
+
+#include <string>
+
 #include "../bitboard.h"
 #include "../board.h"
 #include "../zobrist.h"
-#include <gtest/gtest.h>
-#include <string>
 
 using namespace panda;
 
 class BoardTestEnvironment : public ::testing::Environment {
-public:
+   public:
     void SetUp() override {
         zobrist::init();
     }

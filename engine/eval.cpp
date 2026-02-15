@@ -1,4 +1,5 @@
 #include "eval.h"
+
 #include "bitboard.h"
 #include "types.h"
 
@@ -75,18 +76,16 @@ constexpr int KingPST[64] = {
 };
 // clang-format on
 
-constexpr const int* PST[6] = {
-    PawnPST, KnightPST, BishopPST, RookPST, QueenPST, KingPST
-};
+constexpr const int* PST[6] = {PawnPST, KnightPST, BishopPST, RookPST, QueenPST, KingPST};
 
 // Mirror a square vertically (flip rank) for black PST lookup.
 // White: rank 0 at bottom (A1=0). Black pieces use mirrored index.
 constexpr Square mirror(Square s) {
-    return Square(s ^ 56); // flips rank: rank 0 <-> rank 7
+    return Square(s ^ 56);  // flips rank: rank 0 <-> rank 7
 }
 
 int evaluate(const Board& board) {
-    int score = 0; // from White's perspective
+    int score = 0;  // from White's perspective
 
     for (int pt = Pawn; pt <= King; ++pt) {
         // White pieces
@@ -108,4 +107,4 @@ int evaluate(const Board& board) {
     return (board.side_to_move() == White) ? score : -score;
 }
 
-} // namespace panda
+}  // namespace panda

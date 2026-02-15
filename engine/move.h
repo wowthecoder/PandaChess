@@ -1,8 +1,9 @@
 #pragma once
 
-#include "types.h"
 #include <cstdint>
 #include <string>
+
+#include "types.h"
 
 namespace panda {
 
@@ -15,12 +16,7 @@ namespace panda {
 using Move = uint16_t;
 constexpr Move NullMove = 0;
 
-enum MoveType : uint8_t {
-    Normal    = 0,
-    Promotion = 1,
-    EnPassant = 2,
-    Castling  = 3
-};
+enum MoveType : uint8_t { Normal = 0, Promotion = 1, EnPassant = 2, Castling = 3 };
 
 constexpr Move make_move(Square from, Square to) {
     return Move(from | (to << 6));
@@ -72,13 +68,27 @@ struct MoveList {
     Move moves[256];
     int count = 0;
 
-    void add(Move m) { moves[count++] = m; }
-    int size() const { return count; }
-    Move operator[](int i) const { return moves[i]; }
-    Move* begin() { return moves; }
-    Move* end() { return moves + count; }
-    const Move* begin() const { return moves; }
-    const Move* end() const { return moves + count; }
+    void add(Move m) {
+        moves[count++] = m;
+    }
+    int size() const {
+        return count;
+    }
+    Move operator[](int i) const {
+        return moves[i];
+    }
+    Move* begin() {
+        return moves;
+    }
+    Move* end() {
+        return moves + count;
+    }
+    const Move* begin() const {
+        return moves;
+    }
+    const Move* end() const {
+        return moves + count;
+    }
 };
 
-} // namespace panda
+}  // namespace panda

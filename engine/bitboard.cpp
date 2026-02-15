@@ -1,4 +1,5 @@
 #include "bitboard.h"
+
 #include <sstream>
 
 namespace panda {
@@ -18,4 +19,4 @@ std::string print_bitboard(Bitboard b) {
     return os.str();
 }
 
-} // namespace panda
+}  // namespace panda

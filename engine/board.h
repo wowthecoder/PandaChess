@@ -1,17 +1,18 @@
 #pragma once
 
-#include "types.h"
-#include "bitboard.h"
-#include "move.h"
 #include <cstdint>
 #include <string>
+
+#include "bitboard.h"
+#include "move.h"
+#include "types.h"
 
 namespace panda {
 
 constexpr const char* StartFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 class Board {
-public:
+   public:
     Board();
 
     // FEN interface
@@ -30,17 +31,37 @@ public:
     std::string print() const;
 
     // Accessors
-    Color side_to_move() const { return sideToMove; }
-    CastlingRights castling_rights() const { return castling; }
-    Square en_passant_square() const { return epSquare; }
-    int halfmove_clock() const { return halfmoveClock; }
-    int fullmove_number() const { return fullmoveNumber; }
-    uint64_t hash_key() const { return hash; }
+    Color side_to_move() const {
+        return sideToMove;
+    }
+    CastlingRights castling_rights() const {
+        return castling;
+    }
+    Square en_passant_square() const {
+        return epSquare;
+    }
+    int halfmove_clock() const {
+        return halfmoveClock;
+    }
+    int fullmove_number() const {
+        return fullmoveNumber;
+    }
+    uint64_t hash_key() const {
+        return hash;
+    }
 
-    Bitboard pieces(Piece p) const { return pieceBB[p]; }
-    Bitboard pieces(Color c) const { return occupancy[c]; }
-    Bitboard pieces(Color c, PieceType pt) const { return pieceBB[make_piece(c, pt)]; }
-    Bitboard all_pieces() const { return occupancy[2]; }
+    Bitboard pieces(Piece p) const {
+        return pieceBB[p];
+    }
+    Bitboard pieces(Color c) const {
+        return occupancy[c];
+    }
+    Bitboard pieces(Color c, PieceType pt) const {
+        return pieceBB[make_piece(c, pt)];
+    }
+    Bitboard all_pieces() const {
+        return occupancy[2];
+    }
 
     // Attack detection
     bool is_square_attacked(Square s, Color attacker) const;
@@ -51,11 +72,11 @@ public:
     // Null move: flip side to move, clear en passant (for null move pruning)
     void make_null_move();
 
-private:
+   private:
     void clear();
 
-    Bitboard pieceBB[12];    // one per Piece enum value
-    Bitboard occupancy[3];   // [White], [Black], [All]
+    Bitboard pieceBB[12];   // one per Piece enum value
+    Bitboard occupancy[3];  // [White], [Black], [All]
     Piece mailbox[64];
 
     Color sideToMove;
@@ -66,4 +87,4 @@ private:
     uint64_t hash;
 };
 
-} // namespace panda
+}  // namespace panda

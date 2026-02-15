@@ -1,19 +1,20 @@
 #pragma once
 
-#include "move.h"
 #include <cstdint>
 #include <vector>
+
+#include "move.h"
 
 namespace panda {
 
 enum TTFlag : uint8_t {
     TT_EXACT,
-    TT_ALPHA, // upper bound
-    TT_BETA   // lower bound
+    TT_ALPHA,  // upper bound
+    TT_BETA    // lower bound
 };
 
 struct TTEntry {
-    uint64_t key;     // full Zobrist hash for collision detection
+    uint64_t key;  // full Zobrist hash for collision detection
     int score;
     int depth;
     TTFlag flag;
@@ -21,16 +22,16 @@ struct TTEntry {
 };
 
 class TranspositionTable {
-public:
+   public:
     explicit TranspositionTable(size_t sizeMB = 64);
 
     void store(uint64_t key, int score, int depth, TTFlag flag, Move bestMove);
     bool probe(uint64_t key, TTEntry& entry) const;
     void clear();
 
-private:
+   private:
     std::vector<TTEntry> table;
-    size_t mask; // size - 1, for fast modulo (size is power of 2)
+    size_t mask;  // size - 1, for fast modulo (size is power of 2)
 };
 
-} // namespace panda
+}  // namespace panda

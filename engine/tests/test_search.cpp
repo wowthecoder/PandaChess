@@ -1,3 +1,7 @@
+#include <gtest/gtest.h>
+
+#include <chrono>
+
 #include "../attacks.h"
 #include "../board.h"
 #include "../eval.h"
@@ -6,13 +10,11 @@
 #include "../search.h"
 #include "../tt.h"
 #include "../zobrist.h"
-#include <gtest/gtest.h>
-#include <chrono>
 
 using namespace panda;
 
 class SearchTestEnvironment : public ::testing::Environment {
-public:
+   public:
     void SetUp() override {
         zobrist::init();
         attacks::init();
@@ -24,7 +26,7 @@ public:
 // ============================================================
 
 TEST(TTTest, StoreAndProbe) {
-    TranspositionTable tt(1); // 1 MB
+    TranspositionTable tt(1);  // 1 MB
     uint64_t key = 0x123456789ABCDEF0ULL;
     Move m = make_move(E2, E4);
 
@@ -175,9 +177,10 @@ TEST(SearchTest, IterativeDeepeningReturnsMove) {
 
     TranspositionTable tt(1);
     auto start = std::chrono::steady_clock::now();
-    SearchResult result = search(board, 500, tt); // 500ms time limit
+    SearchResult result = search(board, 500, tt);  // 500ms time limit
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start).count();
+                       std::chrono::steady_clock::now() - start)
+                       .count();
 
     EXPECT_NE(result.bestMove, NullMove);
     // Should complete within reasonable time (allow some overhead)
@@ -190,7 +193,7 @@ TEST(SearchTest, IterativeDeepeningFindsMate) {
     board.set_fen("6k1/5ppp/8/8/8/8/8/K6Q w - - 0 1");
 
     TranspositionTable tt(1);
-    SearchResult result = search(board, 5000, tt); // generous time
+    SearchResult result = search(board, 5000, tt);  // generous time
 
     Board after = board;
     after.make_move(result.bestMove);

@@ -1,9 +1,11 @@
 #include "search.h"
-#include "eval.h"
-#include "movegen.h"
+
 #include <algorithm>
 #include <climits>
 #include <cmath>
+
+#include "eval.h"
+#include "movegen.h"
 
 namespace panda {
 
@@ -11,32 +13,32 @@ namespace panda {
 // Move ordering
 // ============================================================
 
-static constexpr int TT_MOVE_SCORE    = 10000000;
-static constexpr int CAPTURE_BASE     =  1000000;
-static constexpr int KILLER1_SCORE    =   900000;
-static constexpr int KILLER2_SCORE    =   800000;
+static constexpr int TT_MOVE_SCORE = 10000000;
+static constexpr int CAPTURE_BASE = 1000000;
+static constexpr int KILLER1_SCORE = 900000;
+static constexpr int KILLER2_SCORE = 800000;
 
 // Delta pruning margin: a small safety buffer beyond the captured piece value
-static constexpr int DELTA_MARGIN     = 200;
+static constexpr int DELTA_MARGIN = 200;
 
 // Aspiration window initial half-width
 static constexpr int ASPIRATION_WINDOW = 50;
 
 // Late move reduction parameters
-static constexpr int LMR_MIN_DEPTH     = 3;   // Only apply LMR at depth >= 3
-static constexpr int LMR_FULL_SEARCH_MOVES = 3; // Search first N moves at full depth
+static constexpr int LMR_MIN_DEPTH = 3;          // Only apply LMR at depth >= 3
+static constexpr int LMR_FULL_SEARCH_MOVES = 3;  // Search first N moves at full depth
 
 // Futility pruning margins indexed by depth (depth 1..3)
-static constexpr int FUTILITY_MARGIN[4] = { 0, 200, 350, 500 };
+static constexpr int FUTILITY_MARGIN[4] = {0, 200, 350, 500};
 // Reverse futility pruning margins indexed by depth (depth 1..3)
-static constexpr int RFP_MARGIN[4] = { 0, 100, 250, 400 };
+static constexpr int RFP_MARGIN[4] = {0, 100, 250, 400};
 static constexpr int FUTILITY_MAX_DEPTH = 3;
 
 // Null move pruning parameters
-static constexpr int NMP_MIN_DEPTH     = 3;   // Only apply NMP at depth >= 3
-static constexpr int NMP_REDUCTION     = 2;   // Standard reduction
-static constexpr int NMP_VERIFY_DEPTH  = 6;   // Use verified NMP at depth >= 6
-static constexpr int NMP_MIN_MATERIAL  = 400;  // Minimum non-pawn material to allow NMP
+static constexpr int NMP_MIN_DEPTH = 3;       // Only apply NMP at depth >= 3
+static constexpr int NMP_REDUCTION = 2;       // Standard reduction
+static constexpr int NMP_VERIFY_DEPTH = 6;    // Use verified NMP at depth >= 6
+static constexpr int NMP_MIN_MATERIAL = 400;  // Minimum non-pawn material to allow NMP
 
 static bool isCapture(const Board& board, Move m) {
     return board.piece_on(move_to(m)) != NoPiece || move_type(m) == EnPassant;
@@ -60,8 +62,8 @@ static int mvvLvaScore(const Board& board, Move m) {
     return CAPTURE_BASE + victimVal * 10 - attackerVal;
 }
 
-static void scoreMoves(const Board& board, MoveList& moves, int* scores,
-                       Move ttMove, const SearchState& state, int ply) {
+static void scoreMoves(const Board& board, MoveList& moves, int* scores, Move ttMove,
+                       const SearchState& state, int ply) {
     Color side = board.side_to_move();
     for (int i = 0; i < moves.size(); ++i) {
         Move m = moves[i];
@@ -110,7 +112,7 @@ static void scoreCapturesMvvLva(const Board& board, MoveList& moves, int* scores
 
 static int captureValue(const Board& board, Move m) {
     int value = 0;
-    
+
     // Add captured piece value
     if (move_type(m) == EnPassant) {
         value = PieceValue[Pawn];
@@ -119,18 +121,19 @@ static int captureValue(const Board& board, Move m) {
         if (victim != NoPiece)
             value = PieceValue[piece_type(victim)];
     }
-    
+
     // Add promotion gain (Queen value minus Pawn value)
     if (move_type(m) == Promotion) {
         PieceType promoPt = promotion_type(m);
         value += PieceValue[promoPt] - PieceValue[Pawn];
     }
-    
+
     return value;
 }
 
 static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply) {
-    if (state.stopped) return 0;
+    if (state.stopped)
+        return 0;
 
     bool inCheck = in_check(board);
 
@@ -156,8 +159,8 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
     // Check for checkmate/stalemate
     if (captures.size() == 0) {
         if (inCheck)
-            return -MATE_SCORE + ply; // Checkmate: lose in 'ply' half-moves
-        return 0; // Stalemate
+            return -MATE_SCORE + ply;  // Checkmate: lose in 'ply' half-moves
+        return 0;                      // Stalemate
     }
 
     // MVV-LVA ordering for captures
@@ -179,9 +182,10 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         Board child = board;
         child.make_move(m);
 
-        int score = -quiescence(child, -beta, -alpha, state);
+        int score = -quiescence(child, -beta, -alpha, state, ply);
 
-        if (state.stopped) return 0;
+        if (state.stopped)
+            return 0;
 
         if (score >= beta)
             return beta;
@@ -196,14 +200,13 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
 // LMR reduction table (initialized once)
 // ============================================================
 
-static int lmrTable[64][64]; // [depth][moveIndex]
+static int lmrTable[64][64];  // [depth][moveIndex]
 
 static bool lmrInitialized = []() {
     for (int d = 0; d < 64; ++d)
         for (int m = 0; m < 64; ++m)
-            lmrTable[d][m] = (d > 0 && m > 0)
-                ? static_cast<int>(0.75 + std::log(d) * std::log(m) / 2.25)
-                : 0;
+            lmrTable[d][m] =
+                (d > 0 && m > 0) ? static_cast<int>(0.75 + std::log(d) * std::log(m) / 2.25) : 0;
     return true;
 }();
 
@@ -213,10 +216,10 @@ static bool lmrInitialized = []() {
 
 // Non-pawn material for one side (knights, bishops, rooks, queens)
 static int nonPawnMaterial(const Board& board, Color c) {
-    return popcount(board.pieces(c, Knight)) * PieceValue[Knight]
-         + popcount(board.pieces(c, Bishop)) * PieceValue[Bishop]
-         + popcount(board.pieces(c, Rook))   * PieceValue[Rook]
-         + popcount(board.pieces(c, Queen))  * PieceValue[Queen];
+    return popcount(board.pieces(c, Knight)) * PieceValue[Knight] +
+           popcount(board.pieces(c, Bishop)) * PieceValue[Bishop] +
+           popcount(board.pieces(c, Rook)) * PieceValue[Rook] +
+           popcount(board.pieces(c, Queen)) * PieceValue[Queen];
 }
 
 // ============================================================
@@ -243,20 +246,22 @@ static int scoreFromTT(int score, int ply) {
 // Negamax with alpha-beta pruning
 // ============================================================
 
-static int negamax(const Board& board, int depth, int alpha, int beta,
-                   SearchState& state, int ply, bool allowNullMove = true) {
-    if (state.stopped) return 0;
+static int negamax(const Board& board, int depth, int alpha, int beta, SearchState& state, int ply,
+                   bool allowNullMove = true) {
+    if (state.stopped)
+        return 0;
 
     // Periodically check time (every node is fine for now)
-    if (state.checkTime()) return 0;
+    if (state.checkTime())
+        return 0;
 
     MoveList moves = generate_legal(board);
 
     // Terminal node detection
     if (moves.size() == 0) {
         if (in_check(board))
-            return -MATE_SCORE + ply; // Checkmate
-        return 0;                     // Stalemate
+            return -MATE_SCORE + ply;  // Checkmate
+        return 0;                      // Stalemate
     }
 
     // 50-move rule draw
@@ -290,37 +295,34 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
     // Reverse futility pruning (static null move pruning)
     // If our position is so good that even after a margin we still beat beta, prune.
     // Skip in PV nodes to preserve exact scores on the principal variation.
-    if (!pvNode
-        && !inCheck
-        && depth <= FUTILITY_MAX_DEPTH
-        && std::abs(beta) < MATE_SCORE - MAX_PLY
-        && staticEval - RFP_MARGIN[depth] >= beta) {
+    if (!pvNode && !inCheck && depth <= FUTILITY_MAX_DEPTH &&
+        std::abs(beta) < MATE_SCORE - MAX_PLY && staticEval - RFP_MARGIN[depth] >= beta) {
         return staticEval - RFP_MARGIN[depth];
     }
 
     // Null move pruning
-    if (allowNullMove
-        && !inCheck
-        && depth >= NMP_MIN_DEPTH
-        && nonPawnMaterial(board, board.side_to_move()) >= NMP_MIN_MATERIAL) {
-
+    if (allowNullMove && !inCheck && depth >= NMP_MIN_DEPTH &&
+        nonPawnMaterial(board, board.side_to_move()) >= NMP_MIN_MATERIAL) {
         Board nullChild = board;
         nullChild.make_null_move();
 
-        int reduction = NMP_REDUCTION + (depth > 6 ? 1 : 0); // deeper nodes get extra reduction
+        int reduction = NMP_REDUCTION + (depth > 6 ? 1 : 0);  // deeper nodes get extra reduction
         int nullDepth = depth - 1 - reduction;
-        if (nullDepth < 0) nullDepth = 0;
+        if (nullDepth < 0)
+            nullDepth = 0;
 
         int nullScore = -negamax(nullChild, nullDepth, -beta, -beta + 1, state, ply + 1, false);
 
-        if (state.stopped) return 0;
+        if (state.stopped)
+            return 0;
 
         if (nullScore >= beta) {
             // Verified null move pruning at deeper nodes
             if (depth >= NMP_VERIFY_DEPTH) {
                 // Re-search at reduced depth with null moves disabled to verify
                 int verifyScore = negamax(board, nullDepth, beta - 1, beta, state, ply, false);
-                if (state.stopped) return 0;
+                if (state.stopped)
+                    return 0;
                 if (verifyScore >= beta)
                     return beta;
             } else {
@@ -343,14 +345,10 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         bool isPromotion = move_type(m) == Promotion;
 
         // Futility pruning: near leaf, quiet moves that can't possibly raise alpha
-        if (!pvNode
-            && !inCheck
-            && depth <= FUTILITY_MAX_DEPTH
-            && i > 0  // never prune the first move (ensures we have a legal move)
-            && !capture
-            && !isPromotion
-            && std::abs(alpha) < MATE_SCORE - MAX_PLY
-            && staticEval + FUTILITY_MARGIN[depth] <= alpha) {
+        if (!pvNode && !inCheck && depth <= FUTILITY_MAX_DEPTH &&
+            i > 0  // never prune the first move (ensures we have a legal move)
+            && !capture && !isPromotion && std::abs(alpha) < MATE_SCORE - MAX_PLY &&
+            staticEval + FUTILITY_MARGIN[depth] <= alpha) {
             continue;
         }
 
@@ -360,19 +358,18 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         int score;
 
         // Late Move Reductions
-        bool doLMR = !inCheck
-            && depth >= LMR_MIN_DEPTH
-            && i >= LMR_FULL_SEARCH_MOVES
-            && !capture
-            && !isPromotion;
+        bool doLMR = !inCheck && depth >= LMR_MIN_DEPTH && i >= LMR_FULL_SEARCH_MOVES && !capture &&
+                     !isPromotion;
 
         if (doLMR) {
             int d = depth - 1;
             int mi = (i < 64) ? i : 63;
             int reduction = lmrTable[(d < 64) ? d : 63][mi];
-            if (reduction < 1) reduction = 1;
+            if (reduction < 1)
+                reduction = 1;
             int reducedDepth = depth - 1 - reduction;
-            if (reducedDepth < 0) reducedDepth = 0;
+            if (reducedDepth < 0)
+                reducedDepth = 0;
 
             // Reduced-depth zero-window search
             score = -negamax(child, reducedDepth, -alpha - 1, -alpha, state, ply + 1);
@@ -390,7 +387,8 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
             score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1);
         }
 
-        if (state.stopped) return 0;
+        if (state.stopped)
+            return 0;
 
         if (score >= beta) {
             state.tt.store(board.hash_key(), scoreToTT(score, ply), depth, TT_BETA, m);
@@ -450,7 +448,8 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
 
         int score = -negamax(child, depth - 1, -beta, -alpha, state, 1);
 
-        if (state.stopped) break;
+        if (state.stopped)
+            break;
 
         if (score > bestScore) {
             bestScore = score;
@@ -469,7 +468,7 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
         if (bestScore <= origAlpha)
             flag = TT_ALPHA;  // Fail-low: upper bound
         else if (bestScore >= beta)
-            flag = TT_BETA;   // Fail-high: lower bound
+            flag = TT_BETA;  // Fail-high: lower bound
         else
             flag = TT_EXACT;  // Within window: exact score
 
@@ -500,11 +499,12 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
             // Aspiration window around previous score
             int delta = ASPIRATION_WINDOW;
             int alpha = bestResult.score - delta;
-            int beta  = bestResult.score + delta;
+            int beta = bestResult.score + delta;
 
             while (true) {
                 result = searchRoot(board, depth, alpha, beta, state);
-                if (state.stopped) break;
+                if (state.stopped)
+                    break;
 
                 if (result.score <= alpha) {
                     // Fail low: widen alpha
@@ -515,18 +515,17 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
                     beta = (beta + delta < MATE_SCORE + 1) ? beta + delta : MATE_SCORE + 1;
                     delta *= 2;
                 } else {
-                    break; // Score within window
+                    break;  // Score within window
                 }
             }
         }
 
         if (state.stopped)
-            break; // Discard partial iteration, use previous result
+            break;  // Discard partial iteration, use previous result
         bestResult = result;
 
         // Early exit if we found a forced mate
-        if (bestResult.score > MATE_SCORE - MAX_PLY ||
-            bestResult.score < -MATE_SCORE + MAX_PLY)
+        if (bestResult.score > MATE_SCORE - MAX_PLY || bestResult.score < -MATE_SCORE + MAX_PLY)
             break;
     }
 
@@ -536,12 +535,12 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
 SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) {
     SearchState state(tt);
     state.startTime = std::chrono::steady_clock::now();
-    state.timeLimitMs = 0; // 0 means no time limit
-    
+    state.timeLimitMs = 0;  // 0 means no time limit
+
     if (depth < 1)
         depth = 1;
 
     return searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
 }
 
-} // namespace panda
+}  // namespace panda

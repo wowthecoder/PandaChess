@@ -1,7 +1,8 @@
 #pragma once
 
-#include "types.h"
 #include <cstdint>
+
+#include "types.h"
 
 namespace panda {
 
@@ -14,5 +15,5 @@ extern uint64_t sideKey;
 
 void init();
 
-} // namespace zobrist
-} // namespace panda
+}  // namespace zobrist
+}  // namespace panda
