@@ -129,15 +129,20 @@ static int captureValue(const Board& board, Move m) {
     return value;
 }
 
-static int quiescence(const Board& board, int alpha, int beta, SearchState& state) {
+static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply) {
     if (state.stopped) return 0;
 
-    int standPat = evaluate(board);
+    bool inCheck = in_check(board);
 
-    if (standPat >= beta)
-        return beta;
-    if (standPat > alpha)
-        alpha = standPat;
+    // Stand pat only if not in check
+    if (!inCheck) {
+        int standPat = evaluate(board);
+
+        if (standPat >= beta)
+            return beta;
+        if (standPat > alpha)
+            alpha = standPat;
+    }
 
     MoveList allMoves = generate_legal(board);
 
@@ -146,6 +151,13 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
     for (int i = 0; i < allMoves.size(); ++i) {
         if (isCapture(board, allMoves[i]))
             captures.add(allMoves[i]);
+    }
+
+    // Check for checkmate/stalemate
+    if (captures.size() == 0) {
+        if (inCheck)
+            return -MATE_SCORE + ply; // Checkmate: lose in 'ply' half-moves
+        return 0; // Stalemate
     }
 
     // MVV-LVA ordering for captures
@@ -157,8 +169,12 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         Move m = captures[i];
 
         // Delta pruning: skip if the capture + margin can't possibly raise alpha
-        if (standPat + captureValue(board, m) + DELTA_MARGIN < alpha)
-            continue;
+        // Only apply when not in check and we have a valid standPat
+        if (!inCheck) {
+            int standPat = evaluate(board);
+            if (standPat + captureValue(board, m) + DELTA_MARGIN < alpha)
+                continue;
+        }
 
         Board child = board;
         child.make_move(m);
@@ -204,6 +220,26 @@ static int nonPawnMaterial(const Board& board, Color c) {
 }
 
 // ============================================================
+// Mate score normalization helpers
+// ============================================================
+
+static int scoreToTT(int score, int ply) {
+    if (score >= MATE_SCORE - MAX_PLY)
+        return score + ply;  // Mate for us: increase distance
+    if (score <= -MATE_SCORE + MAX_PLY)
+        return score - ply;  // Mate against us: decrease (more negative)
+    return score;
+}
+
+static int scoreFromTT(int score, int ply) {
+    if (score >= MATE_SCORE - MAX_PLY)
+        return score - ply;  // Mate for us: decrease distance to current ply
+    if (score <= -MATE_SCORE + MAX_PLY)
+        return score + ply;  // Mate against us: increase (less negative)
+    return score;
+}
+
+// ============================================================
 // Negamax with alpha-beta pruning
 // ============================================================
 
@@ -214,21 +250,6 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
     // Periodically check time (every node is fine for now)
     if (state.checkTime()) return 0;
 
-    // TT probe
-    TTEntry ttEntry;
-    Move ttMove = NullMove;
-    if (state.tt.probe(board.hash_key(), ttEntry)) {
-        ttMove = ttEntry.bestMove;
-        if (ttEntry.depth >= depth) {
-            if (ttEntry.flag == TT_EXACT)
-                return ttEntry.score;
-            if (ttEntry.flag == TT_BETA && ttEntry.score >= beta)
-                return ttEntry.score;
-            if (ttEntry.flag == TT_ALPHA && ttEntry.score <= alpha)
-                return ttEntry.score;
-        }
-    }
-
     MoveList moves = generate_legal(board);
 
     // Terminal node detection
@@ -238,13 +259,29 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         return 0;                     // Stalemate
     }
 
-    // Base case: quiescence search
-    if (depth == 0)
-        return quiescence(board, alpha, beta, state);
-
     // 50-move rule draw
     if (is_draw_by_fifty_move_rule(board))
         return 0;
+
+    // TT probe
+    TTEntry ttEntry;
+    Move ttMove = NullMove;
+    if (state.tt.probe(board.hash_key(), ttEntry)) {
+        ttMove = ttEntry.bestMove;
+        if (ttEntry.depth >= depth) {
+            int ttScore = scoreFromTT(ttEntry.score, ply);
+            if (ttEntry.flag == TT_EXACT)
+                return ttScore;
+            if (ttEntry.flag == TT_BETA && ttEntry.score >= beta)
+                return ttScore;
+            if (ttEntry.flag == TT_ALPHA && ttEntry.score <= alpha)
+                return ttScore;
+        }
+    }
+
+    // Base case: quiescence search
+    if (depth == 0)
+        return quiescence(board, alpha, beta, state, ply);
 
     bool inCheck = in_check(board);
     bool pvNode = (beta - alpha > 1);
@@ -356,7 +393,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         if (state.stopped) return 0;
 
         if (score >= beta) {
-            state.tt.store(board.hash_key(), score, depth, TT_BETA, m);
+            state.tt.store(board.hash_key(), scoreToTT(score, ply), depth, TT_BETA, m);
 
             // Update killer moves and history for quiet moves
             if (!capture) {
@@ -376,7 +413,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         }
     }
 
-    state.tt.store(board.hash_key(), alpha, depth, flag, bestMove);
+    state.tt.store(board.hash_key(), scoreToTT(alpha, ply), depth, flag, bestMove);
     return alpha;
 }
 
@@ -386,6 +423,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
 
 static SearchResult searchRoot(const Board& board, int depth, int alpha, int beta,
                                SearchState& state) {
+    const int origAlpha = alpha;
     MoveList moves = generate_legal(board);
 
     if (moves.size() == 0)
@@ -420,10 +458,23 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
         }
         if (score > alpha)
             alpha = score;
+
+        if (alpha >= beta)
+            break;
     }
 
-    if (!state.stopped)
-        state.tt.store(board.hash_key(), bestScore, depth, TT_EXACT, bestMove);
+    if (!state.stopped) {
+        // Determine correct TT flag based on window bounds
+        TTFlag flag;
+        if (bestScore <= origAlpha)
+            flag = TT_ALPHA;  // Fail-low: upper bound
+        else if (bestScore >= beta)
+            flag = TT_BETA;   // Fail-high: lower bound
+        else
+            flag = TT_EXACT;  // Within window: exact score
+
+        state.tt.store(board.hash_key(), scoreToTT(bestScore, 0), depth, flag, bestMove);
+    }
 
     return {bestMove, bestScore};
 }
@@ -486,6 +537,9 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) 
     SearchState state(tt);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = 0; // 0 means no time limit
+    
+    if (depth < 1)
+        depth = 1;
 
     return searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
 }
