@@ -1,13 +1,56 @@
 #include "search.h"
 
 #include <algorithm>
+#include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstring>
 
 #include "eval.h"
 #include "movegen.h"
 
 namespace panda {
+
+struct SearchState {
+    TranspositionTable& tt;
+    Move killers[MAX_PLY][2];  // 2 killer moves per ply
+    int history[2][64][64];    // [color][from][to] history scores
+    std::chrono::steady_clock::time_point startTime;
+    int timeLimitMs;
+    bool stopped;
+    std::atomic<bool>* externalStop;  // set by UCI "stop" command
+    uint64_t nodes;
+
+    explicit SearchState(TranspositionTable& tt_, std::atomic<bool>* extStop = nullptr)
+        : tt(tt_), timeLimitMs(0), stopped(false), externalStop(extStop), nodes(0) {
+        clear();
+    }
+
+    void clear() {
+        std::memset(killers, 0, sizeof(killers));
+        std::memset(history, 0, sizeof(history));
+        stopped = false;
+        nodes = 0;
+    }
+
+    bool checkTime() {
+        // Check external stop flag (from UCI "stop")
+        if (externalStop && externalStop->load(std::memory_order_relaxed)) {
+            stopped = true;
+            return true;
+        }
+        if (timeLimitMs <= 0)
+            return false;
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
+        if (elapsed >= timeLimitMs) {
+            stopped = true;
+            return true;
+        }
+        return false;
+    }
+};
 
 // ============================================================
 // Move ordering
@@ -134,6 +177,7 @@ static int captureValue(const Board& board, Move m) {
 static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply) {
     if (state.stopped)
         return 0;
+    ++state.nodes;
 
     bool inCheck = in_check(board);
     MoveList allMoves = generate_legal(board);
@@ -254,6 +298,8 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
     // Periodically check time (every node is fine for now)
     if (state.checkTime())
         return 0;
+
+    ++state.nodes;
 
     MoveList moves = generate_legal(board);
 
@@ -544,6 +590,107 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) 
         depth = 1;
 
     return searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+}
+
+std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxLen) {
+    std::vector<Move> pv;
+    Board b = board;
+    for (int i = 0; i < maxLen; ++i) {
+        TTEntry entry;
+        if (!tt.probe(b.hash_key(), entry) || entry.bestMove == NullMove)
+            break;
+        // Verify the move is legal
+        MoveList legal = generate_legal(b);
+        bool found = false;
+        for (int j = 0; j < legal.size(); ++j) {
+            if (legal[j] == entry.bestMove) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            break;
+        pv.push_back(entry.bestMove);
+        b.make_move(entry.bestMove);
+    }
+    return pv;
+}
+
+SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
+                    std::atomic<bool>& stopFlag, InfoCallback infoCallback) {
+    SearchState state(tt, &stopFlag);
+    state.startTime = std::chrono::steady_clock::now();
+    state.timeLimitMs = timeLimitMs;
+
+    SearchResult bestResult = {NullMove, 0};
+
+    if (maxDepth < 1)
+        maxDepth = MAX_PLY;
+
+    for (int depth = 1; depth <= maxDepth; ++depth) {
+        SearchResult result;
+
+        if (depth <= 1) {
+            result = searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+        } else {
+            int delta = ASPIRATION_WINDOW;
+            int alpha = bestResult.score - delta;
+            int beta = bestResult.score + delta;
+
+            while (true) {
+                result = searchRoot(board, depth, alpha, beta, state);
+                if (state.stopped)
+                    break;
+
+                if (result.score <= alpha) {
+                    alpha = (alpha - delta > -MATE_SCORE - 1) ? alpha - delta : -MATE_SCORE - 1;
+                    delta *= 2;
+                } else if (result.score >= beta) {
+                    beta = (beta + delta < MATE_SCORE + 1) ? beta + delta : MATE_SCORE + 1;
+                    delta *= 2;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (state.stopped)
+            break;
+        bestResult = result;
+
+        // Send info callback
+        if (infoCallback) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - state.startTime).count();
+
+            SearchInfo info;
+            info.depth = depth;
+            info.score = bestResult.score;
+            info.nodes = state.nodes;
+            info.timeMs = elapsed;
+            info.pv = extractPV(board, tt, depth);
+
+            // Determine if this is a mate score
+            if (bestResult.score > MATE_SCORE - MAX_PLY) {
+                info.isMate = true;
+                info.mateInPly = (MATE_SCORE - bestResult.score + 1) / 2;
+            } else if (bestResult.score < -MATE_SCORE + MAX_PLY) {
+                info.isMate = true;
+                info.mateInPly = -((MATE_SCORE + bestResult.score + 1) / 2);
+            } else {
+                info.isMate = false;
+                info.mateInPly = 0;
+            }
+
+            infoCallback(info);
+        }
+
+        if (bestResult.score > MATE_SCORE - MAX_PLY || bestResult.score < -MATE_SCORE + MAX_PLY)
+            break;
+    }
+
+    return bestResult;
 }
 
 }  // namespace panda

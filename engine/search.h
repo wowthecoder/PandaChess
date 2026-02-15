@@ -1,7 +1,9 @@
 #pragma once
 
-#include <chrono>
-#include <cstring>
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <vector>
 
 #include "board.h"
 #include "move.h"
@@ -17,42 +19,31 @@ struct SearchResult {
     int score;
 };
 
-struct SearchState {
-    TranspositionTable& tt;
-    Move killers[MAX_PLY][2];  // 2 killer moves per ply
-    int history[2][64][64];    // [color][from][to] history scores
-    std::chrono::steady_clock::time_point startTime;
-    int timeLimitMs;
-    bool stopped;
-
-    explicit SearchState(TranspositionTable& tt_) : tt(tt_), timeLimitMs(0), stopped(false) {
-        clear();
-    }
-
-    void clear() {
-        std::memset(killers, 0, sizeof(killers));
-        std::memset(history, 0, sizeof(history));
-        stopped = false;
-    }
-
-    bool checkTime() {
-        if (timeLimitMs <= 0)
-            return false;
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
-        if (elapsed >= timeLimitMs) {
-            stopped = true;
-            return true;
-        }
-        return false;
-    }
+// Info sent after each iterative deepening iteration
+struct SearchInfo {
+    int depth;
+    int score;
+    bool isMate;    // true if score is a mate score
+    int mateInPly;  // positive = we mate, negative = we get mated
+    uint64_t nodes;
+    int64_t timeMs;
+    std::vector<Move> pv;
 };
+
+// Callback type for search info updates
+using InfoCallback = std::function<void(const SearchInfo&)>;
 
 // Time-limited search (iterative deepening)
 SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt);
 
 // Fixed-depth search (for tests, backward compatibility)
 SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt);
+
+// UCI-friendly search with external stop and info callback
+SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
+                    std::atomic<bool>& stopFlag, InfoCallback infoCallback = nullptr);
+
+// Extract principal variation from transposition table
+std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxLen);
 
 }  // namespace panda
