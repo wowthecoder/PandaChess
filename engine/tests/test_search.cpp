@@ -201,6 +201,52 @@ TEST(SearchTest, IterativeDeepeningFindsMate) {
     EXPECT_GT(result.score, MATE_SCORE - 100);
 }
 
+// ============================================================
+// Quiescence regression tests
+// ============================================================
+
+TEST(SearchTest, QuiescenceQuietLeafKeepsMaterialAdvantage) {
+    // White is up a rook in a quiet endgame. A depth-2 search should not collapse to draw score.
+    Board board;
+    board.set_fen("4k3/8/8/8/8/8/8/4KR2 w - - 0 1");
+
+    TranspositionTable tt(1);
+    SearchResult result = searchDepth(board, 2, tt);
+
+    EXPECT_GT(result.score, 200);
+}
+
+TEST(SearchTest, QuiescenceInCheckDoesNotReturnFalseMate) {
+    // This is not a mate-in-1 position, but broken in-check qsearch can report mate.
+    Board board;
+    board.set_fen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
+
+    TranspositionTable tt(1);
+    SearchResult result = searchDepth(board, 1, tt);
+
+    Board after = board;
+    after.make_move(result.bestMove);
+
+    EXPECT_FALSE(is_checkmate(after));
+    EXPECT_LT(result.score, MATE_SCORE - MAX_PLY);
+}
+
+TEST(SearchTest, QuiescenceMateDistanceConsistentAcrossDepths) {
+    // In this tactical position, d2 and d3 should agree on mate distance.
+    // If qsearch does not increment ply on recursion, d2 is off by one.
+    Board board;
+    board.set_fen("r2qkbnr/pb1n3p/1p1pp3/2pP1QP1/8/2N1P3/PPP1BPP1/R1B1K1NR w KQkq - 1 10");
+
+    TranspositionTable tt2(1);
+    SearchResult d2 = searchDepth(board, 2, tt2);
+
+    TranspositionTable tt3(1);
+    SearchResult d3 = searchDepth(board, 3, tt3);
+
+    EXPECT_GT(d3.score, MATE_SCORE - MAX_PLY);
+    EXPECT_EQ(d2.score, d3.score);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     ::testing::AddGlobalTestEnvironment(new SearchTestEnvironment());

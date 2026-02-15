@@ -136,40 +136,40 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         return 0;
 
     bool inCheck = in_check(board);
+    MoveList allMoves = generate_legal(board);
+    MoveList qmoves;
 
-    // Stand pat only if not in check
-    if (!inCheck) {
+    if (inCheck) {
+        qmoves = allMoves;
+    } else {
+        // Stand pat only if not in check
         int standPat = evaluate(board);
 
         if (standPat >= beta)
             return beta;
         if (standPat > alpha)
             alpha = standPat;
-    }
 
-    MoveList allMoves = generate_legal(board);
-
-    // Filter to captures only
-    MoveList captures;
-    for (int i = 0; i < allMoves.size(); ++i) {
-        if (isCapture(board, allMoves[i]))
-            captures.add(allMoves[i]);
+        for (int i = 0; i < allMoves.size(); ++i) {
+            if (isCapture(board, allMoves[i]))
+                qmoves.add(allMoves[i]);
+        }
     }
 
     // Check for checkmate/stalemate
-    if (captures.size() == 0) {
+    if (qmoves.size() == 0) {
         if (inCheck)
             return -MATE_SCORE + ply;  // Checkmate: lose in 'ply' half-moves
-        return 0;                      // Stalemate
+        return alpha;                  // Stalemate
     }
 
     // MVV-LVA ordering for captures
     int scores[256];
-    scoreCapturesMvvLva(board, captures, scores);
+    scoreCapturesMvvLva(board, qmoves, scores);
 
-    for (int i = 0; i < captures.size(); ++i) {
-        pickBest(captures, scores, i);
-        Move m = captures[i];
+    for (int i = 0; i < qmoves.size(); ++i) {
+        pickBest(qmoves, scores, i);
+        Move m = qmoves[i];
 
         // Delta pruning: skip if the capture + margin can't possibly raise alpha
         // Only apply when not in check and we have a valid standPat
@@ -182,7 +182,7 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         Board child = board;
         child.make_move(m);
 
-        int score = -quiescence(child, -beta, -alpha, state, ply);
+        int score = -quiescence(child, -beta, -alpha, state, ply + 1);
 
         if (state.stopped)
             return 0;
@@ -277,9 +277,9 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
             int ttScore = scoreFromTT(ttEntry.score, ply);
             if (ttEntry.flag == TT_EXACT)
                 return ttScore;
-            if (ttEntry.flag == TT_BETA && ttEntry.score >= beta)
+            if (ttEntry.flag == TT_BETA && ttScore >= beta)
                 return ttScore;
-            if (ttEntry.flag == TT_ALPHA && ttEntry.score <= alpha)
+            if (ttEntry.flag == TT_ALPHA && ttScore <= alpha)
                 return ttScore;
         }
     }
@@ -320,7 +320,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
             // Verified null move pruning at deeper nodes
             if (depth >= NMP_VERIFY_DEPTH) {
                 // Re-search at reduced depth with null moves disabled to verify
-                int verifyScore = negamax(board, nullDepth, beta - 1, beta, state, ply, false);
+                int verifyScore = negamax(board, depth - 1, beta - 1, beta, state, ply, false);
                 if (state.stopped)
                     return 0;
                 if (verifyScore >= beta)
@@ -424,8 +424,11 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
     const int origAlpha = alpha;
     MoveList moves = generate_legal(board);
 
-    if (moves.size() == 0)
-        return {NullMove, 0};
+    if (moves.size() == 0) {
+        if (in_check(board))
+            return {NullMove, -MATE_SCORE};  // side to move is checkmated at root (ply 0)
+        return {NullMove, 0};                // stalemate
+    }
 
     // TT move ordering at root
     TTEntry ttEntry;
