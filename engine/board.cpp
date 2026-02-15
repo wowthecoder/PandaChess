@@ -326,4 +326,15 @@ void Board::make_move(Move m) {
         hash ^= zobrist::enPassantKeys[square_file(epSquare)];
 }
 
+void Board::make_null_move() {
+    // Remove old EP hash
+    if (epSquare != NoSquare)
+        hash ^= zobrist::enPassantKeys[square_file(epSquare)];
+
+    epSquare = NoSquare;
+    sideToMove = ~sideToMove;
+    hash ^= zobrist::sideKey;
+    halfmoveClock++;
+}
+
 } // namespace panda

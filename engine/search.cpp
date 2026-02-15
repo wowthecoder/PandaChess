@@ -3,6 +3,7 @@
 #include "movegen.h"
 #include <algorithm>
 #include <climits>
+#include <cmath>
 
 namespace panda {
 
@@ -14,6 +15,28 @@ static constexpr int TT_MOVE_SCORE    = 10000000;
 static constexpr int CAPTURE_BASE     =  1000000;
 static constexpr int KILLER1_SCORE    =   900000;
 static constexpr int KILLER2_SCORE    =   800000;
+
+// Delta pruning margin: a small safety buffer beyond the captured piece value
+static constexpr int DELTA_MARGIN     = 200;
+
+// Aspiration window initial half-width
+static constexpr int ASPIRATION_WINDOW = 50;
+
+// Late move reduction parameters
+static constexpr int LMR_MIN_DEPTH     = 3;   // Only apply LMR at depth >= 3
+static constexpr int LMR_FULL_SEARCH_MOVES = 3; // Search first N moves at full depth
+
+// Futility pruning margins indexed by depth (depth 1..3)
+static constexpr int FUTILITY_MARGIN[4] = { 0, 200, 350, 500 };
+// Reverse futility pruning margins indexed by depth (depth 1..3)
+static constexpr int RFP_MARGIN[4] = { 0, 100, 250, 400 };
+static constexpr int FUTILITY_MAX_DEPTH = 3;
+
+// Null move pruning parameters
+static constexpr int NMP_MIN_DEPTH     = 3;   // Only apply NMP at depth >= 3
+static constexpr int NMP_REDUCTION     = 2;   // Standard reduction
+static constexpr int NMP_VERIFY_DEPTH  = 6;   // Use verified NMP at depth >= 6
+static constexpr int NMP_MIN_MATERIAL  = 400;  // Minimum non-pawn material to allow NMP
 
 static bool isCapture(const Board& board, Move m) {
     return board.piece_on(move_to(m)) != NoPiece || move_type(m) == EnPassant;
@@ -85,6 +108,27 @@ static void scoreCapturesMvvLva(const Board& board, MoveList& moves, int* scores
 // Quiescence search
 // ============================================================
 
+static int captureValue(const Board& board, Move m) {
+    int value = 0;
+    
+    // Add captured piece value
+    if (move_type(m) == EnPassant) {
+        value = PieceValue[Pawn];
+    } else {
+        Piece victim = board.piece_on(move_to(m));
+        if (victim != NoPiece)
+            value = PieceValue[piece_type(victim)];
+    }
+    
+    // Add promotion gain (Queen value minus Pawn value)
+    if (move_type(m) == Promotion) {
+        PieceType promoPt = promotion_type(m);
+        value += PieceValue[promoPt] - PieceValue[Pawn];
+    }
+    
+    return value;
+}
+
 static int quiescence(const Board& board, int alpha, int beta, SearchState& state) {
     if (state.stopped) return 0;
 
@@ -112,6 +156,10 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         pickBest(captures, scores, i);
         Move m = captures[i];
 
+        // Delta pruning: skip if the capture + margin can't possibly raise alpha
+        if (standPat + captureValue(board, m) + DELTA_MARGIN < alpha)
+            continue;
+
         Board child = board;
         child.make_move(m);
 
@@ -129,11 +177,38 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
 }
 
 // ============================================================
+// LMR reduction table (initialized once)
+// ============================================================
+
+static int lmrTable[64][64]; // [depth][moveIndex]
+
+static bool lmrInitialized = []() {
+    for (int d = 0; d < 64; ++d)
+        for (int m = 0; m < 64; ++m)
+            lmrTable[d][m] = (d > 0 && m > 0)
+                ? static_cast<int>(0.75 + std::log(d) * std::log(m) / 2.25)
+                : 0;
+    return true;
+}();
+
+// ============================================================
+// Null move pruning helpers
+// ============================================================
+
+// Non-pawn material for one side (knights, bishops, rooks, queens)
+static int nonPawnMaterial(const Board& board, Color c) {
+    return popcount(board.pieces(c, Knight)) * PieceValue[Knight]
+         + popcount(board.pieces(c, Bishop)) * PieceValue[Bishop]
+         + popcount(board.pieces(c, Rook))   * PieceValue[Rook]
+         + popcount(board.pieces(c, Queen))  * PieceValue[Queen];
+}
+
+// ============================================================
 // Negamax with alpha-beta pruning
 // ============================================================
 
 static int negamax(const Board& board, int depth, int alpha, int beta,
-                   SearchState& state, int ply) {
+                   SearchState& state, int ply, bool allowNullMove = true) {
     if (state.stopped) return 0;
 
     // Periodically check time (every node is fine for now)
@@ -154,10 +229,6 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         }
     }
 
-    // Base case: quiescence search
-    if (depth == 0)
-        return quiescence(board, alpha, beta, state);
-
     MoveList moves = generate_legal(board);
 
     // Terminal node detection
@@ -167,9 +238,59 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
         return 0;                     // Stalemate
     }
 
+    // Base case: quiescence search
+    if (depth == 0)
+        return quiescence(board, alpha, beta, state);
+
     // 50-move rule draw
     if (is_draw_by_fifty_move_rule(board))
         return 0;
+
+    bool inCheck = in_check(board);
+    bool pvNode = (beta - alpha > 1);
+    int staticEval = evaluate(board);
+
+    // Reverse futility pruning (static null move pruning)
+    // If our position is so good that even after a margin we still beat beta, prune.
+    // Skip in PV nodes to preserve exact scores on the principal variation.
+    if (!pvNode
+        && !inCheck
+        && depth <= FUTILITY_MAX_DEPTH
+        && std::abs(beta) < MATE_SCORE - MAX_PLY
+        && staticEval - RFP_MARGIN[depth] >= beta) {
+        return staticEval - RFP_MARGIN[depth];
+    }
+
+    // Null move pruning
+    if (allowNullMove
+        && !inCheck
+        && depth >= NMP_MIN_DEPTH
+        && nonPawnMaterial(board, board.side_to_move()) >= NMP_MIN_MATERIAL) {
+
+        Board nullChild = board;
+        nullChild.make_null_move();
+
+        int reduction = NMP_REDUCTION + (depth > 6 ? 1 : 0); // deeper nodes get extra reduction
+        int nullDepth = depth - 1 - reduction;
+        if (nullDepth < 0) nullDepth = 0;
+
+        int nullScore = -negamax(nullChild, nullDepth, -beta, -beta + 1, state, ply + 1, false);
+
+        if (state.stopped) return 0;
+
+        if (nullScore >= beta) {
+            // Verified null move pruning at deeper nodes
+            if (depth >= NMP_VERIFY_DEPTH) {
+                // Re-search at reduced depth with null moves disabled to verify
+                int verifyScore = negamax(board, nullDepth, beta - 1, beta, state, ply, false);
+                if (state.stopped) return 0;
+                if (verifyScore >= beta)
+                    return beta;
+            } else {
+                return beta;
+            }
+        }
+    }
 
     // Score and order moves
     int scores[256];
@@ -181,11 +302,56 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
     for (int i = 0; i < moves.size(); ++i) {
         pickBest(moves, scores, i);
         Move m = moves[i];
+        bool capture = isCapture(board, m);
+        bool isPromotion = move_type(m) == Promotion;
+
+        // Futility pruning: near leaf, quiet moves that can't possibly raise alpha
+        if (!pvNode
+            && !inCheck
+            && depth <= FUTILITY_MAX_DEPTH
+            && i > 0  // never prune the first move (ensures we have a legal move)
+            && !capture
+            && !isPromotion
+            && std::abs(alpha) < MATE_SCORE - MAX_PLY
+            && staticEval + FUTILITY_MARGIN[depth] <= alpha) {
+            continue;
+        }
 
         Board child = board;
         child.make_move(m);
 
-        int score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1);
+        int score;
+
+        // Late Move Reductions
+        bool doLMR = !inCheck
+            && depth >= LMR_MIN_DEPTH
+            && i >= LMR_FULL_SEARCH_MOVES
+            && !capture
+            && !isPromotion;
+
+        if (doLMR) {
+            int d = depth - 1;
+            int mi = (i < 64) ? i : 63;
+            int reduction = lmrTable[(d < 64) ? d : 63][mi];
+            if (reduction < 1) reduction = 1;
+            int reducedDepth = depth - 1 - reduction;
+            if (reducedDepth < 0) reducedDepth = 0;
+
+            // Reduced-depth zero-window search
+            score = -negamax(child, reducedDepth, -alpha - 1, -alpha, state, ply + 1);
+
+            // Re-search at full depth with zero window if it beats alpha
+            if (!state.stopped && score > alpha) {
+                score = -negamax(child, depth - 1, -alpha - 1, -alpha, state, ply + 1);
+            }
+
+            // Full window re-search if it still beats alpha (PVS-style)
+            if (!state.stopped && score > alpha && score < beta) {
+                score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1);
+            }
+        } else {
+            score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1);
+        }
 
         if (state.stopped) return 0;
 
@@ -193,7 +359,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
             state.tt.store(board.hash_key(), score, depth, TT_BETA, m);
 
             // Update killer moves and history for quiet moves
-            if (!isCapture(board, m)) {
+            if (!capture) {
                 if (ply < MAX_PLY) {
                     state.killers[ply][1] = state.killers[ply][0];
                     state.killers[ply][0] = m;
@@ -218,7 +384,8 @@ static int negamax(const Board& board, int depth, int alpha, int beta,
 // Root search (single depth iteration)
 // ============================================================
 
-static SearchResult searchRoot(const Board& board, int depth, SearchState& state) {
+static SearchResult searchRoot(const Board& board, int depth, int alpha, int beta,
+                               SearchState& state) {
     MoveList moves = generate_legal(board);
 
     if (moves.size() == 0)
@@ -235,8 +402,6 @@ static SearchResult searchRoot(const Board& board, int depth, SearchState& state
 
     Move bestMove = moves[0];
     int bestScore = -MATE_SCORE - 1;
-    int alpha = -MATE_SCORE - 1;
-    int beta = MATE_SCORE + 1;
 
     for (int i = 0; i < moves.size(); ++i) {
         pickBest(moves, scores, i);
@@ -275,7 +440,35 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
     SearchResult bestResult = {NullMove, 0};
 
     for (int depth = 1; depth <= MAX_PLY; ++depth) {
-        SearchResult result = searchRoot(board, depth, state);
+        SearchResult result;
+
+        if (depth <= 1) {
+            // First iteration: full window
+            result = searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+        } else {
+            // Aspiration window around previous score
+            int delta = ASPIRATION_WINDOW;
+            int alpha = bestResult.score - delta;
+            int beta  = bestResult.score + delta;
+
+            while (true) {
+                result = searchRoot(board, depth, alpha, beta, state);
+                if (state.stopped) break;
+
+                if (result.score <= alpha) {
+                    // Fail low: widen alpha
+                    alpha = (alpha - delta > -MATE_SCORE - 1) ? alpha - delta : -MATE_SCORE - 1;
+                    delta *= 2;
+                } else if (result.score >= beta) {
+                    // Fail high: widen beta
+                    beta = (beta + delta < MATE_SCORE + 1) ? beta + delta : MATE_SCORE + 1;
+                    delta *= 2;
+                } else {
+                    break; // Score within window
+                }
+            }
+        }
+
         if (state.stopped)
             break; // Discard partial iteration, use previous result
         bestResult = result;
@@ -294,7 +487,7 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) 
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = 0; // 0 means no time limit
 
-    return searchRoot(board, depth, state);
+    return searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
 }
 
 } // namespace panda

@@ -48,6 +48,9 @@ public:
     // Make a move on the board (modifies in place)
     void make_move(Move m);
 
+    // Null move: flip side to move, clear en passant (for null move pruning)
+    void make_null_move();
+
 private:
     void clear();
 
