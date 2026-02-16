@@ -28,6 +28,7 @@ class TranspositionTable {
     void store(uint64_t key, int score, int depth, TTFlag flag, Move bestMove);
     bool probe(uint64_t key, TTEntry& entry) const;
     void clear();
+    int hashfull_permille(size_t sampleSize = 1000) const;
 
    private:
     std::vector<TTEntry> table;

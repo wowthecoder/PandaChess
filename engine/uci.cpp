@@ -18,6 +18,8 @@ namespace panda {
 
 static const char* ENGINE_NAME = "PandaChess";
 static const char* ENGINE_AUTHOR = "PandaChess Team";
+static constexpr int MOVE_OVERHEAD_MS = 20;
+static constexpr int MIN_SEARCH_MS = 1;
 
 // Parse a UCI move string (e.g. "e2e4", "e7e8q") and match against legal moves
 static Move parseUCIMove(const Board& board, const std::string& str) {
@@ -112,6 +114,7 @@ static void parseGoAndSearch(const Board& board, std::istringstream& iss, Transp
                              std::atomic<bool>& stopFlag, std::thread& searchThread) {
     int wtime = 0, btime = 0, winc = 0, binc = 0;
     int movetime = 0;
+    int movestogo = 0;
     int depth = 0;
     bool infinite = false;
 
@@ -127,6 +130,8 @@ static void parseGoAndSearch(const Board& board, std::istringstream& iss, Transp
             iss >> binc;
         else if (token == "movetime")
             iss >> movetime;
+        else if (token == "movestogo")
+            iss >> movestogo;
         else if (token == "depth")
             iss >> depth;
         else if (token == "infinite")
@@ -136,19 +141,25 @@ static void parseGoAndSearch(const Board& board, std::istringstream& iss, Transp
     // Calculate time to search
     int timeLimitMs = 0;
     if (movetime > 0) {
-        timeLimitMs = movetime;
+        // Keep safety overhead so we do not lose on GUI/OS scheduling latency.
+        timeLimitMs = movetime - MOVE_OVERHEAD_MS;
+        if (timeLimitMs < MIN_SEARCH_MS)
+            timeLimitMs = MIN_SEARCH_MS;
     } else if (!infinite && (wtime > 0 || btime > 0)) {
-        // Simple time management: use 1/30 of remaining time + 3/4 of increment
+        // Simple time management: use a share of remaining time + increment.
         int myTime = (board.side_to_move() == White) ? wtime : btime;
         int myInc = (board.side_to_move() == White) ? winc : binc;
-        timeLimitMs = myTime / 30 + (myInc * 3) / 4;
-        // Don't use more than 80% of remaining time
-        int maxTime = (myTime * 4) / 5;
+        int divisor = (movestogo > 0) ? movestogo : 30;
+        timeLimitMs = myTime / divisor + (myInc * 3) / 4;
+
+        // Hard cap below remaining clock to preserve move-overhead safety.
+        int maxTime = myTime - MOVE_OVERHEAD_MS;
+        if (maxTime < MIN_SEARCH_MS)
+            maxTime = MIN_SEARCH_MS;
         if (timeLimitMs > maxTime)
             timeLimitMs = maxTime;
-        // Minimum 10ms
-        if (timeLimitMs < 10)
-            timeLimitMs = 10;
+        if (timeLimitMs < MIN_SEARCH_MS)
+            timeLimitMs = MIN_SEARCH_MS;
     }
     // If infinite or no time control: timeLimitMs stays 0 (no limit)
 
@@ -158,34 +169,36 @@ static void parseGoAndSearch(const Board& board, std::istringstream& iss, Transp
     Board searchBoard = board;
     stopFlag.store(false, std::memory_order_relaxed);
 
-    searchThread = std::thread(
-        [searchBoard, timeLimitMs, maxDepth, &tt, &stopFlag]() {
-            auto infoCb = [](const SearchInfo& info) {
-                std::cout << "info depth " << info.depth;
-                if (info.isMate) {
-                    std::cout << " score mate " << info.mateInPly;
-                } else {
-                    std::cout << " score cp " << info.score;
-                }
-                std::cout << " nodes " << info.nodes;
-                std::cout << " time " << info.timeMs;
-                if (info.timeMs > 0) {
-                    uint64_t nps = (info.nodes * 1000) / static_cast<uint64_t>(info.timeMs);
-                    std::cout << " nps " << nps;
-                }
-                if (!info.pv.empty()) {
-                    std::cout << " pv";
-                    for (Move m : info.pv)
-                        std::cout << " " << move_to_uci(m);
-                }
-                std::cout << std::endl;
-            };
+    searchThread = std::thread([searchBoard, timeLimitMs, maxDepth, &tt, &stopFlag]() {
+        auto infoCb = [&tt](const SearchInfo& info) {
+            std::cout << "info depth " << info.depth;
+            if (info.isMate) {
+                std::cout << " score mate " << info.mateInPly;
+            } else {
+                std::cout << " score cp " << info.score;
+            }
+            std::cout << " nodes " << info.nodes;
+            std::cout << " time " << info.timeMs;
+            std::cout << " hashfull " << tt.hashfull_permille();
+            if (info.timeMs > 0) {
+                uint64_t nps = (info.nodes * 1000) / static_cast<uint64_t>(info.timeMs);
+                std::cout << " nps " << nps;
+            }
+            if (!info.pv.empty()) {
+                std::cout << " pv";
+                for (Move m : info.pv) std::cout << " " << move_to_uci(m);
+            }
+            std::cout << std::endl;
+        };
 
-            SearchResult result =
-                search(searchBoard, timeLimitMs, maxDepth, tt, stopFlag, infoCb);
+        SearchResult result = search(searchBoard, timeLimitMs, maxDepth, tt, stopFlag, infoCb);
 
+        if (result.bestMove == NullMove) {
+            std::cout << "bestmove 0000" << std::endl;
+        } else {
             std::cout << "bestmove " << move_to_uci(result.bestMove) << std::endl;
-        });
+        }
+    });
 }
 
 void uci_loop() {
@@ -240,8 +253,7 @@ void uci_loop() {
             std::string name;
             iss >> name;
             // Read multi-word option names
-            while (iss >> token && token != "value")
-                name += " " + token;
+            while (iss >> token && token != "value") name += " " + token;
             std::string value;
             if (iss >> value) {
                 if (name == "Hash") {
@@ -260,6 +272,12 @@ void uci_loop() {
             }
             break;
         }
+    }
+
+    // ADDED: Cleanup when exiting loop (EOF or error)
+    if (searchThread.joinable()) {
+        stopFlag.store(true, std::memory_order_relaxed);
+        searchThread.join();
     }
 }
 

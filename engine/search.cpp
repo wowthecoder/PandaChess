@@ -177,6 +177,8 @@ static int captureValue(const Board& board, Move m) {
 static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply) {
     if (state.stopped)
         return 0;
+    if (state.checkTime())
+        return 0;
     ++state.nodes;
 
     bool inCheck = in_check(board);
@@ -654,8 +656,12 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
             }
         }
 
-        if (state.stopped)
+        if (state.stopped) {
+            // Keep a legal root move even when stopped during depth 1.
+            if (depth == 1 && result.bestMove != NullMove)
+                bestResult = result;
             break;
+        }
         bestResult = result;
 
         // Send info callback

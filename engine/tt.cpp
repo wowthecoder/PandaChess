@@ -1,5 +1,7 @@
 #include "tt.h"
 
+#include <algorithm>
+
 namespace panda {
 
 TranspositionTable::TranspositionTable(size_t sizeMB) {
@@ -39,6 +41,23 @@ void TranspositionTable::clear() {
         entry.flag = TT_EXACT;
         entry.bestMove = NullMove;
     }
+}
+
+int TranspositionTable::hashfull_permille(size_t sampleSize) const {
+    if (table.empty())
+        return 0;
+
+    size_t sample = std::min(sampleSize, table.size());
+    if (sample == 0)
+        return 0;
+
+    size_t used = 0;
+    for (size_t i = 0; i < sample; ++i) {
+        if (table[i].key != 0)
+            ++used;
+    }
+
+    return static_cast<int>((used * 1000) / sample);
 }
 
 }  // namespace panda
