@@ -13,6 +13,18 @@ constexpr const char* StartFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w 
 
 class Board {
    public:
+    struct UndoInfo {
+        Piece moved = NoPiece;
+        Piece captured = NoPiece;
+        Square capturedSquare = NoSquare;
+        Color sideToMove = White;
+        CastlingRights castling = NoCastling;
+        Square epSquare = NoSquare;
+        int halfmoveClock = 0;
+        int fullmoveNumber = 1;
+        uint64_t hash = 0;
+    };
+
     Board();
 
     // FEN interface
@@ -68,9 +80,13 @@ class Board {
 
     // Make a move on the board (modifies in place)
     void make_move(Move m);
+    void make_move(Move m, UndoInfo& undo);
+    void unmake_move(Move m, const UndoInfo& undo);
 
     // Null move: flip side to move, clear en passant (for null move pruning)
     void make_null_move();
+    void make_null_move(UndoInfo& undo);
+    void unmake_null_move(const UndoInfo& undo);
 
    private:
     void clear();

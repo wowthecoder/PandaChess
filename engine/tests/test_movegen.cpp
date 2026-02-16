@@ -255,6 +255,85 @@ TEST(MakeMoveTest, CastlingRightsRookCapture) {
     EXPECT_FALSE(board.castling_rights() & BlackKingSide);
 }
 
+TEST(MakeMoveTest, UnmakeRoundtripNormalMove) {
+    Board board;
+    board.set_fen(StartFEN);
+    std::string beforeFen = board.to_fen();
+    uint64_t beforeHash = board.hash_key();
+
+    Move m = make_move(E2, E4);
+    Board::UndoInfo undo;
+    board.make_move(m, undo);
+    board.unmake_move(m, undo);
+
+    EXPECT_EQ(board.to_fen(), beforeFen);
+    EXPECT_EQ(board.hash_key(), beforeHash);
+    EXPECT_EQ(board.hash_key(), board.compute_hash());
+}
+
+TEST(MakeMoveTest, UnmakeRoundtripEnPassant) {
+    Board board;
+    board.set_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3");
+    std::string beforeFen = board.to_fen();
+    uint64_t beforeHash = board.hash_key();
+
+    Move m = make_move(E5, D6, EnPassant);
+    Board::UndoInfo undo;
+    board.make_move(m, undo);
+    board.unmake_move(m, undo);
+
+    EXPECT_EQ(board.to_fen(), beforeFen);
+    EXPECT_EQ(board.hash_key(), beforeHash);
+    EXPECT_EQ(board.hash_key(), board.compute_hash());
+}
+
+TEST(MakeMoveTest, UnmakeRoundtripCastling) {
+    Board board;
+    board.set_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1");
+    std::string beforeFen = board.to_fen();
+    uint64_t beforeHash = board.hash_key();
+
+    Move m = make_move(E1, G1, Castling);
+    Board::UndoInfo undo;
+    board.make_move(m, undo);
+    board.unmake_move(m, undo);
+
+    EXPECT_EQ(board.to_fen(), beforeFen);
+    EXPECT_EQ(board.hash_key(), beforeHash);
+    EXPECT_EQ(board.hash_key(), board.compute_hash());
+}
+
+TEST(MakeMoveTest, UnmakeRoundtripPromotionCapture) {
+    Board board;
+    board.set_fen("1n6/P7/8/8/8/8/8/4K2k w - - 0 1");
+    std::string beforeFen = board.to_fen();
+    uint64_t beforeHash = board.hash_key();
+
+    Move m = make_promotion(A7, B8, Queen);
+    Board::UndoInfo undo;
+    board.make_move(m, undo);
+    board.unmake_move(m, undo);
+
+    EXPECT_EQ(board.to_fen(), beforeFen);
+    EXPECT_EQ(board.hash_key(), beforeHash);
+    EXPECT_EQ(board.hash_key(), board.compute_hash());
+}
+
+TEST(MakeMoveTest, UnmakeRoundtripNullMove) {
+    Board board;
+    board.set_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
+    std::string beforeFen = board.to_fen();
+    uint64_t beforeHash = board.hash_key();
+
+    Board::UndoInfo undo;
+    board.make_null_move(undo);
+    board.unmake_null_move(undo);
+
+    EXPECT_EQ(board.to_fen(), beforeFen);
+    EXPECT_EQ(board.hash_key(), beforeHash);
+    EXPECT_EQ(board.hash_key(), board.compute_hash());
+}
+
 // ============================================================
 // Perft tests
 // ============================================================

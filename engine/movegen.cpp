@@ -193,7 +193,7 @@ static void generate_piece_moves(const Board& board, MoveList& moves) {
     }
 }
 
-MoveList generate_legal(const Board& board) {
+MoveList generate_legal(Board& board) {
     MoveList pseudo;
     generate_pawn_moves(board, pseudo);
     generate_piece_moves(board, pseudo);
@@ -202,16 +202,22 @@ MoveList generate_legal(const Board& board) {
     MoveList legal;
 
     for (int i = 0; i < pseudo.size(); ++i) {
-        Board copy = board;
-        copy.make_move(pseudo[i]);
+        Board::UndoInfo undo;
+        board.make_move(pseudo[i], undo);
         // After making the move, side has flipped, so check if our king is attacked by opponent
-        Square kingSq = lsb(copy.pieces(us, King));
-        if (!copy.is_square_attacked(kingSq, ~us)) {
+        Square kingSq = lsb(board.pieces(us, King));
+        if (!board.is_square_attacked(kingSq, ~us)) {
             legal.add(pseudo[i]);
         }
+        board.unmake_move(pseudo[i], undo);
     }
 
     return legal;
+}
+
+MoveList generate_legal(const Board& board) {
+    Board copy = board;
+    return generate_legal(copy);
 }
 
 bool in_check(const Board& board) {
@@ -247,7 +253,7 @@ GameTermination game_termination(const Board& board) {
     return GameTermination::None;
 }
 
-uint64_t perft(const Board& board, int depth) {
+static uint64_t perft_impl(Board& board, int depth) {
     if (depth == 0)
         return 1;
 
@@ -258,11 +264,17 @@ uint64_t perft(const Board& board, int depth) {
 
     uint64_t nodes = 0;
     for (int i = 0; i < moves.size(); ++i) {
-        Board copy = board;
-        copy.make_move(moves[i]);
-        nodes += perft(copy, depth - 1);
+        Board::UndoInfo undo;
+        board.make_move(moves[i], undo);
+        nodes += perft_impl(board, depth - 1);
+        board.unmake_move(moves[i], undo);
     }
     return nodes;
+}
+
+uint64_t perft(const Board& board, int depth) {
+    Board copy = board;
+    return perft_impl(copy, depth);
 }
 
 }  // namespace panda

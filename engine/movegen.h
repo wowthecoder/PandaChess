@@ -10,6 +10,7 @@ namespace panda {
 enum class GameTermination : uint8_t { None, Checkmate, Stalemate, FiftyMoveRule };
 
 MoveList generate_legal(const Board& board);
+MoveList generate_legal(Board& board);
 
 uint64_t perft(const Board& board, int depth);
 

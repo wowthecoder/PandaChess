@@ -213,7 +213,7 @@ static int captureValue(const Board& board, Move m) {
     return value;
 }
 
-static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply,
+static int quiescence(Board& board, int alpha, int beta, SearchState& state, int ply,
                       int repIndex) {
     if (state.stopped)
         return 0;
@@ -224,6 +224,7 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
     if (isThreefoldRepetition(board, state, repIndex))
         return 0;
 
+    int standPat = 0;
     bool inCheck = in_check(board);
     MoveList allMoves = generate_legal(board);
     MoveList qmoves;
@@ -232,7 +233,7 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         qmoves = allMoves;
     } else {
         // Stand pat only if not in check
-        int standPat = evaluate(board);
+        standPat = evaluate(board);
 
         if (standPat >= beta)
             return beta;
@@ -263,20 +264,20 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
         // Delta pruning: skip if the capture + margin can't possibly raise alpha
         // Only apply when not in check and we have a valid standPat
         if (!inCheck) {
-            int standPat = evaluate(board);
             if (standPat + captureValue(board, m) + DELTA_MARGIN < alpha)
                 continue;
         }
 
-        Board child = board;
-        child.make_move(m);
+        Board::UndoInfo undo;
+        board.make_move(m, undo);
         int childRepIndex = repIndex + 1;
         if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
-            state.repetitionHistory.push_back(child.hash_key());
+            state.repetitionHistory.push_back(board.hash_key());
         else
-            state.repetitionHistory[childRepIndex] = child.hash_key();
+            state.repetitionHistory[childRepIndex] = board.hash_key();
 
-        int score = -quiescence(child, -beta, -alpha, state, ply + 1, childRepIndex);
+        int score = -quiescence(board, -beta, -alpha, state, ply + 1, childRepIndex);
+        board.unmake_move(m, undo);
 
         if (state.stopped)
             return 0;
@@ -340,7 +341,7 @@ static int scoreFromTT(int score, int ply) {
 // Negamax with alpha-beta pruning
 // ============================================================
 
-static int negamax(const Board& board, int depth, int alpha, int beta, SearchState& state, int ply,
+static int negamax(Board& board, int depth, int alpha, int beta, SearchState& state, int ply,
                    int repIndex, bool allowNullMove = true) {
     if (state.stopped)
         return 0;
@@ -353,15 +354,6 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
 
     if (isThreefoldRepetition(board, state, repIndex))
         return 0;
-
-    MoveList moves = generate_legal(board);
-
-    // Terminal node detection
-    if (moves.size() == 0) {
-        if (in_check(board))
-            return -MATE_SCORE + ply;  // Checkmate
-        return 0;                      // Stalemate
-    }
 
     // 50-move rule draw
     if (is_draw_by_fifty_move_rule(board))
@@ -387,6 +379,15 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
     if (depth == 0)
         return quiescence(board, alpha, beta, state, ply, repIndex);
 
+    MoveList moves = generate_legal(board);
+
+    // Terminal node detection
+    if (moves.size() == 0) {
+        if (in_check(board))
+            return -MATE_SCORE + ply;  // Checkmate
+        return 0;                      // Stalemate
+    }
+
     bool inCheck = in_check(board);
     bool pvNode = (beta - alpha > 1);
     int staticEval = evaluate(board);
@@ -402,8 +403,8 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
     // Null move pruning
     if (allowNullMove && !inCheck && depth >= NMP_MIN_DEPTH &&
         nonPawnMaterial(board, board.side_to_move()) >= NMP_MIN_MATERIAL) {
-        Board nullChild = board;
-        nullChild.make_null_move();
+        Board::UndoInfo nullUndo;
+        board.make_null_move(nullUndo);
 
         int reduction = NMP_REDUCTION + (depth > 6 ? 1 : 0);  // deeper nodes get extra reduction
         int nullDepth = depth - 1 - reduction;
@@ -411,12 +412,13 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
             nullDepth = 0;
         int nullRepIndex = repIndex + 1;
         if (nullRepIndex >= static_cast<int>(state.repetitionHistory.size()))
-            state.repetitionHistory.push_back(nullChild.hash_key());
+            state.repetitionHistory.push_back(board.hash_key());
         else
-            state.repetitionHistory[nullRepIndex] = nullChild.hash_key();
+            state.repetitionHistory[nullRepIndex] = board.hash_key();
 
         int nullScore =
-            -negamax(nullChild, nullDepth, -beta, -beta + 1, state, ply + 1, nullRepIndex, false);
+            -negamax(board, nullDepth, -beta, -beta + 1, state, ply + 1, nullRepIndex, false);
+        board.unmake_null_move(nullUndo);
 
         if (state.stopped)
             return 0;
@@ -458,13 +460,13 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
             continue;
         }
 
-        Board child = board;
-        child.make_move(m);
+        Board::UndoInfo undo;
+        board.make_move(m, undo);
         int childRepIndex = repIndex + 1;
         if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
-            state.repetitionHistory.push_back(child.hash_key());
+            state.repetitionHistory.push_back(board.hash_key());
         else
-            state.repetitionHistory[childRepIndex] = child.hash_key();
+            state.repetitionHistory[childRepIndex] = board.hash_key();
 
         int score;
 
@@ -483,22 +485,23 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
                 reducedDepth = 0;
 
             // Reduced-depth zero-window search
-            score = -negamax(child, reducedDepth, -alpha - 1, -alpha, state, ply + 1,
-                             childRepIndex);
+            score =
+                -negamax(board, reducedDepth, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
 
             // Re-search at full depth with zero window if it beats alpha
             if (!state.stopped && score > alpha) {
                 score =
-                    -negamax(child, depth - 1, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
+                    -negamax(board, depth - 1, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
             }
 
             // Full window re-search if it still beats alpha (PVS-style)
             if (!state.stopped && score > alpha && score < beta) {
-                score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
+                score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
             }
         } else {
-            score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
+            score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
         }
+        board.unmake_move(m, undo);
 
         if (state.stopped)
             return 0;
@@ -532,8 +535,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
 // Root search (single depth iteration)
 // ============================================================
 
-static SearchResult searchRoot(const Board& board, int depth, int alpha, int beta,
-                               SearchState& state) {
+static SearchResult searchRoot(Board& board, int depth, int alpha, int beta, SearchState& state) {
     const int origAlpha = alpha;
     MoveList moves = generate_legal(board);
 
@@ -562,15 +564,16 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
         pickBest(moves, scores, i);
         Move m = moves[i];
 
-        Board child = board;
-        child.make_move(m);
+        Board::UndoInfo undo;
+        board.make_move(m, undo);
         int childRepIndex = state.rootRepIndex + 1;
         if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
-            state.repetitionHistory.push_back(child.hash_key());
+            state.repetitionHistory.push_back(board.hash_key());
         else
-            state.repetitionHistory[childRepIndex] = child.hash_key();
+            state.repetitionHistory[childRepIndex] = board.hash_key();
 
-        int score = -negamax(child, depth - 1, -beta, -alpha, state, 1, childRepIndex);
+        int score = -negamax(board, depth - 1, -beta, -alpha, state, 1, childRepIndex);
+        board.unmake_move(m, undo);
 
         if (state.stopped)
             break;
@@ -611,6 +614,7 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = timeLimitMs;
     initRepetitionHistory(state, board, {});
+    Board root = board;
 
     SearchResult bestResult = {NullMove, 0};
 
@@ -619,7 +623,7 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
 
         if (depth <= 1) {
             // First iteration: full window
-            result = searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+            result = searchRoot(root, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
         } else {
             // Aspiration window around previous score
             int delta = ASPIRATION_WINDOW;
@@ -627,7 +631,7 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
             int beta = bestResult.score + delta;
 
             while (true) {
-                result = searchRoot(board, depth, alpha, beta, state);
+                result = searchRoot(root, depth, alpha, beta, state);
                 if (state.stopped)
                     break;
 
@@ -662,11 +666,12 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) 
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = 0;  // 0 means no time limit
     initRepetitionHistory(state, board, {});
+    Board root = board;
 
     if (depth < 1)
         depth = 1;
 
-    return searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+    return searchRoot(root, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
 }
 
 std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxLen) {
@@ -705,6 +710,7 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = timeLimitMs;
     initRepetitionHistory(state, board, repetitionHistory);
+    Board root = board;
 
     SearchResult bestResult = {NullMove, 0};
 
@@ -715,14 +721,14 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
         SearchResult result;
 
         if (depth <= 1) {
-            result = searchRoot(board, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+            result = searchRoot(root, depth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
         } else {
             int delta = ASPIRATION_WINDOW;
             int alpha = bestResult.score - delta;
             int beta = bestResult.score + delta;
 
             while (true) {
-                result = searchRoot(board, depth, alpha, beta, state);
+                result = searchRoot(root, depth, alpha, beta, state);
                 if (state.stopped)
                     break;
 
@@ -750,7 +756,8 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
         if (infoCallback) {
             auto now = std::chrono::steady_clock::now();
             auto elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(now - state.startTime).count();
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - state.startTime)
+                    .count();
 
             SearchInfo info;
             info.depth = depth;

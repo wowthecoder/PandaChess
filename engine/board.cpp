@@ -343,12 +343,27 @@ static constexpr CastlingRights CastlingUpdate[64] = {
 };
 
 void Board::make_move(Move m) {
+    UndoInfo undo;
+    make_move(m, undo);
+}
+
+void Board::make_move(Move m, UndoInfo& undo) {
     Square from = move_from(m);
     Square to = move_to(m);
     MoveType mt = move_type(m);
     Piece moved = mailbox[from];
     Piece captured = mailbox[to];
     Color us = sideToMove;
+
+    undo.moved = moved;
+    undo.captured = captured;
+    undo.capturedSquare = to;
+    undo.sideToMove = sideToMove;
+    undo.castling = castling;
+    undo.epSquare = epSquare;
+    undo.halfmoveClock = halfmoveClock;
+    undo.fullmoveNumber = fullmoveNumber;
+    undo.hash = hash;
 
     // Remove old castling hash, EP hash
     hash ^= zobrist::castlingKeys[castling];
@@ -361,6 +376,9 @@ void Board::make_move(Move m) {
     if (mt == EnPassant) {
         // The captured pawn is on a different square
         Square capSq = make_square(square_file(to), square_rank(from));
+        captured = mailbox[capSq];
+        undo.captured = captured;
+        undo.capturedSquare = capSq;
         remove_piece(capSq);
         remove_piece(from);
         put_piece(moved, to);
@@ -427,7 +445,64 @@ void Board::make_move(Move m) {
         hash ^= zobrist::enPassantKeys[square_file(epSquare)];
 }
 
+void Board::unmake_move(Move m, const UndoInfo& undo) {
+    Square from = move_from(m);
+    Square to = move_to(m);
+    MoveType mt = move_type(m);
+
+    if (mt == Castling) {
+        // Move king back
+        remove_piece(to);
+        put_piece(undo.moved, from);
+
+        // Move rook back
+        Square rookFrom, rookTo;
+        if (to > from) {  // Kingside
+            rookFrom = make_square(7, square_rank(from));
+            rookTo = make_square(5, square_rank(from));
+        } else {  // Queenside
+            rookFrom = make_square(0, square_rank(from));
+            rookTo = make_square(3, square_rank(from));
+        }
+
+        Piece rook = mailbox[rookTo];
+        remove_piece(rookTo);
+        put_piece(rook, rookFrom);
+    } else {
+        // Move piece back (promotion is handled by restoring original moved piece from undo)
+        remove_piece(to);
+        put_piece(undo.moved, from);
+
+        // Restore captured piece, if any (including en passant)
+        if (undo.captured != NoPiece) {
+            put_piece(undo.captured, undo.capturedSquare);
+        }
+    }
+
+    sideToMove = undo.sideToMove;
+    castling = undo.castling;
+    epSquare = undo.epSquare;
+    halfmoveClock = undo.halfmoveClock;
+    fullmoveNumber = undo.fullmoveNumber;
+    hash = undo.hash;
+}
+
 void Board::make_null_move() {
+    UndoInfo undo;
+    make_null_move(undo);
+}
+
+void Board::make_null_move(UndoInfo& undo) {
+    undo.moved = NoPiece;
+    undo.captured = NoPiece;
+    undo.capturedSquare = NoSquare;
+    undo.sideToMove = sideToMove;
+    undo.castling = castling;
+    undo.epSquare = epSquare;
+    undo.halfmoveClock = halfmoveClock;
+    undo.fullmoveNumber = fullmoveNumber;
+    undo.hash = hash;
+
     // Remove old EP hash
     if (epSquare != NoSquare)
         hash ^= zobrist::enPassantKeys[square_file(epSquare)];
@@ -436,6 +511,15 @@ void Board::make_null_move() {
     sideToMove = ~sideToMove;
     hash ^= zobrist::sideKey;
     halfmoveClock++;
+}
+
+void Board::unmake_null_move(const UndoInfo& undo) {
+    sideToMove = undo.sideToMove;
+    castling = undo.castling;
+    epSquare = undo.epSquare;
+    halfmoveClock = undo.halfmoveClock;
+    fullmoveNumber = undo.fullmoveNumber;
+    hash = undo.hash;
 }
 
 }  // namespace panda
