@@ -1,5 +1,6 @@
 #include "eval.h"
 
+#include "attacks.h"
 #include "bitboard.h"
 #include "types.h"
 
@@ -9,29 +10,20 @@ namespace panda {
 // PeSTO Tapered Evaluation
 // ============================================================
 //
-// Uses separate middlegame (MG) and endgame (EG) piece values and
-// piece-square tables, interpolated by a game-phase value derived
-// from remaining non-pawn material.
-//
-// PST tables are in CPW visual format:
-//   index 0  = a8, index 7  = h8  (rank 8)
-//   index 56 = a1, index 63 = h1  (rank 1)
-//
-// Access pattern (PandaChess uses A1=0, H8=63):
-//   White piece at square s: table[s ^ 56]  (mirror rank)
-//   Black piece at square s: table[s]       (natural mirror)
+// PST tables are in CPW visual format (index 0 = a8).
+// Access: White piece at square s → table[s ^ 56], Black → table[s].
 
 // Phase weights per piece type
 constexpr int PHASE_WEIGHT[6] = {0, 1, 1, 2, 4, 0};
-constexpr int TOTAL_PHASE = 24;  // 4N + 4B + 4R + 2Q = 4+4+8+8
+constexpr int TOTAL_PHASE = 24;
 
-// MG / EG base piece values (positional bonus is in the PSTs below)
+// MG / EG base piece values
 constexpr int MG_PIECE_VALUE[6] = {82, 337, 365, 477, 1025, 0};
 constexpr int EG_PIECE_VALUE[6] = {94, 281, 297, 512, 936, 0};
 
 // clang-format off
 
-// ---- Middlegame piece-square tables (positional component only) ----
+// ---- Middlegame piece-square tables ----
 
 constexpr int MG_PAWN_TABLE[64] = {
       0,   0,   0,   0,   0,   0,   0,   0,
@@ -99,7 +91,7 @@ constexpr int MG_KING_TABLE[64] = {
     -15,  36,  12, -54,   8, -28,  24,  14
 };
 
-// ---- Endgame piece-square tables (positional component only) ----
+// ---- Endgame piece-square tables ----
 
 constexpr int EG_PAWN_TABLE[64] = {
       0,   0,   0,   0,   0,   0,   0,   0,
@@ -175,48 +167,374 @@ constexpr const int* MG_PST[6] = {MG_PAWN_TABLE,   MG_KNIGHT_TABLE, MG_BISHOP_TA
 constexpr const int* EG_PST[6] = {EG_PAWN_TABLE,   EG_KNIGHT_TABLE, EG_BISHOP_TABLE,
                                    EG_ROOK_TABLE,   EG_QUEEN_TABLE,  EG_KING_TABLE};
 
+// ============================================================
+// Helper masks for pawn structure
+// ============================================================
+
+// Adjacent files: for isolated pawn and passed pawn detection
+constexpr Bitboard AdjacentFileMask[8] = {
+    FileMask[1],
+    FileMask[0] | FileMask[2],
+    FileMask[1] | FileMask[3],
+    FileMask[2] | FileMask[4],
+    FileMask[3] | FileMask[5],
+    FileMask[4] | FileMask[6],
+    FileMask[5] | FileMask[7],
+    FileMask[6],
+};
+
+// Forward ranks: all ranks ahead of a given rank for each color
+// ForwardRanks[White][r] = all squares on ranks r+1..7
+// ForwardRanks[Black][r] = all squares on ranks 0..r-1
+constexpr Bitboard ForwardRanks[2][8] = {
+    {// White
+     0xFFFFFFFFFFFFFF00ULL, 0xFFFFFFFFFFFF0000ULL, 0xFFFFFFFFFF000000ULL,
+     0xFFFFFFFF00000000ULL, 0xFFFFFF0000000000ULL, 0xFFFF000000000000ULL,
+     0xFF00000000000000ULL, 0x0000000000000000ULL},
+    {// Black
+     0x0000000000000000ULL, 0x00000000000000FFULL, 0x000000000000FFFFULL,
+     0x0000000000FFFFFFULL, 0x00000000FFFFFFFFULL, 0x000000FFFFFFFFFFULL,
+     0x0000FFFFFFFFFFFFULL, 0x00FFFFFFFFFFFFFFULL},
+};
+
+// ============================================================
+// Evaluation bonuses/penalties
+// ============================================================
+
+// Passed pawn bonus by rank (from the pawn's perspective, 0=rank1, 7=rank8)
+// Index is the pawn's rank for white; for black, use (7-rank).
+// clang-format off
+constexpr int PassedPawnMG[8] = {0,  5, 10, 15, 25, 40, 65, 0};
+constexpr int PassedPawnEG[8] = {0, 10, 15, 25, 45, 75,120, 0};
+// clang-format on
+
+// Isolated pawn penalty
+constexpr int IsolatedPawnMG = -10;
+constexpr int IsolatedPawnEG = -15;
+
+// Doubled pawn penalty (per extra pawn on a file)
+constexpr int DoubledPawnMG = -10;
+constexpr int DoubledPawnEG = -15;
+
+// Bishop pair bonus
+constexpr int BishopPairMG = 30;
+constexpr int BishopPairEG = 50;
+
+// Rook on open / semi-open file
+constexpr int RookOpenFileMG = 20;
+constexpr int RookOpenFileEG = 10;
+constexpr int RookSemiOpenFileMG = 10;
+constexpr int RookSemiOpenFileEG = 5;
+
+// King pawn shield (MG penalty per missing pawn in shield zone)
+constexpr int PawnShieldPenaltyMG = -10;
+
+// King attacker weights by piece type (indexed by PieceType)
+// Higher weight = more dangerous attacker near the king
+constexpr int KingAttackerWeight[5] = {0, 2, 2, 3, 5};  // Pawn, Knight, Bishop, Rook, Queen
+
+// Non-linear king danger penalty table (indexed by total attack weight, clamped to 0..99)
+// The penalty accelerates as more/stronger pieces attack the king zone.
+// clang-format off
+constexpr int KingDangerTable[100] = {
+      0,   0,   1,   2,   3,   5,   7,  9,   12,  15,
+     18,  22,  26,  30,  35,  39,  44,  50,  56,  62,
+     68,  75,  82,  85,  89,  97, 105, 113, 122, 131,
+    140, 150, 169, 180, 191, 202, 213, 225, 237, 248,
+    260, 272, 283, 295, 307, 319, 330, 342, 354, 366,
+    377, 389, 401, 412, 424, 436, 448, 459, 471, 483,
+    494, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+    500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+    500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+    500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+};
+// clang-format on
+
+// Mobility tables: bonus per number of safe squares
+// clang-format off
+constexpr int KnightMobilityMG[9] = {-15, -5,  0,  5, 10, 15, 18, 20, 22};
+constexpr int KnightMobilityEG[9] = {-20, -8, -2,  3,  8, 13, 17, 20, 22};
+
+constexpr int BishopMobilityMG[14] = {-15, -8, -2,  2,  6, 10, 14, 17, 19, 21, 23, 25, 27, 28};
+constexpr int BishopMobilityEG[14] = {-20,-10, -4,  0,  5, 10, 14, 17, 20, 22, 24, 26, 27, 28};
+
+constexpr int RookMobilityMG[15] = {-15,-10, -5, -2,  0,  2,  5,  7,  9, 11, 13, 14, 15, 16, 17};
+constexpr int RookMobilityEG[15] = {-25,-15, -8, -3,  0,  5,  9, 13, 16, 19, 21, 23, 25, 26, 27};
+
+constexpr int QueenMobilityMG[28] = {
+    -10, -7, -4, -2,  0,  1,  2,  3,  4,  5,  5,  6,  6,  7,
+      7,  7,  8,  8,  8,  8,  9,  9,  9,  9,  9,  9, 10, 10
+};
+constexpr int QueenMobilityEG[28] = {
+    -20,-14, -8, -4, -1,  1,  3,  5,  7,  9, 11, 12, 14, 15,
+     16, 17, 18, 19, 20, 20, 21, 21, 22, 22, 22, 23, 23, 23
+};
+// clang-format on
+
 // Mirror a square vertically (flip rank).
-// Converts PandaChess convention (A1=0) to CPW convention (A8=0) and vice versa.
 constexpr Square mirror(Square s) {
     return Square(s ^ 56);
 }
+
+// ============================================================
+// Evaluation helpers
+// ============================================================
+
+// Evaluate pawn structure for one color, accumulate into mg/eg scores (from White's perspective).
+// sign: +1 for White, -1 for Black.
+static void evalPawns(const Board& board, Color us, int sign, int& mgScore, int& egScore) {
+    Color them = ~us;
+    Bitboard ourPawns = board.pieces(us, Pawn);
+    Bitboard theirPawns = board.pieces(them, Pawn);
+
+    // --- Doubled pawns: count per file ---
+    for (int f = 0; f < 8; ++f) {
+        int cnt = popcount(ourPawns & FileMask[f]);
+        if (cnt > 1) {
+            mgScore += sign * DoubledPawnMG * (cnt - 1);
+            egScore += sign * DoubledPawnEG * (cnt - 1);
+        }
+    }
+
+    // --- Per-pawn terms: passed, isolated ---
+    Bitboard pawns = ourPawns;
+    while (pawns) {
+        Square s = pop_lsb(pawns);
+        int file = square_file(s);
+        int rank = square_rank(s);
+
+        // Rank from the pawn's perspective (how far advanced)
+        int relRank = (us == White) ? rank : (7 - rank);
+
+        // Passed pawn: no enemy pawns on same/adjacent files ahead
+        Bitboard frontSpan =
+            (FileMask[file] | AdjacentFileMask[file]) & ForwardRanks[us][rank];
+        if (!(theirPawns & frontSpan)) {
+            mgScore += sign * PassedPawnMG[relRank];
+            egScore += sign * PassedPawnEG[relRank];
+        }
+
+        // Isolated pawn: no friendly pawns on adjacent files
+        if (!(ourPawns & AdjacentFileMask[file])) {
+            mgScore += sign * IsolatedPawnMG;
+            egScore += sign * IsolatedPawnEG;
+        }
+    }
+}
+
+// Evaluate mobility for one color, accumulate into mg/eg scores.
+static void evalMobility(const Board& board, Color us, int sign, int& mgScore, int& egScore) {
+    Bitboard occ = board.all_pieces();
+    Bitboard ownPieces = board.pieces(us);
+
+    // Knights
+    Bitboard pieces = board.pieces(us, Knight);
+    while (pieces) {
+        Square s = pop_lsb(pieces);
+        int mob = popcount(attacks::knight_attacks(s) & ~ownPieces);
+        if (mob > 8) mob = 8;
+        mgScore += sign * KnightMobilityMG[mob];
+        egScore += sign * KnightMobilityEG[mob];
+    }
+
+    // Bishops
+    pieces = board.pieces(us, Bishop);
+    while (pieces) {
+        Square s = pop_lsb(pieces);
+        int mob = popcount(attacks::bishop_attacks(s, occ) & ~ownPieces);
+        if (mob > 13) mob = 13;
+        mgScore += sign * BishopMobilityMG[mob];
+        egScore += sign * BishopMobilityEG[mob];
+    }
+
+    // Rooks
+    pieces = board.pieces(us, Rook);
+    while (pieces) {
+        Square s = pop_lsb(pieces);
+        int mob = popcount(attacks::rook_attacks(s, occ) & ~ownPieces);
+        if (mob > 14) mob = 14;
+        mgScore += sign * RookMobilityMG[mob];
+        egScore += sign * RookMobilityEG[mob];
+    }
+
+    // Queens
+    pieces = board.pieces(us, Queen);
+    while (pieces) {
+        Square s = pop_lsb(pieces);
+        int mob = popcount(attacks::queen_attacks(s, occ) & ~ownPieces);
+        if (mob > 27) mob = 27;
+        mgScore += sign * QueenMobilityMG[mob];
+        egScore += sign * QueenMobilityEG[mob];
+    }
+}
+
+// Evaluate pieces (bishop pair, rook on open/semi-open file) for one color.
+static void evalPieces(const Board& board, Color us, int sign, int& mgScore, int& egScore) {
+    Bitboard ourPawns = board.pieces(us, Pawn);
+    Bitboard theirPawns = board.pieces(~us, Pawn);
+    Bitboard allPawns = ourPawns | theirPawns;
+
+    // Bishop pair
+    if (popcount(board.pieces(us, Bishop)) >= 2) {
+        mgScore += sign * BishopPairMG;
+        egScore += sign * BishopPairEG;
+    }
+
+    // Rook on open / semi-open file
+    Bitboard rooks = board.pieces(us, Rook);
+    while (rooks) {
+        Square s = pop_lsb(rooks);
+        int file = square_file(s);
+        Bitboard fileBB = FileMask[file];
+
+        if (!(allPawns & fileBB)) {
+            // Open file: no pawns at all
+            mgScore += sign * RookOpenFileMG;
+            egScore += sign * RookOpenFileEG;
+        } else if (!(ourPawns & fileBB)) {
+            // Semi-open file: no friendly pawns
+            mgScore += sign * RookSemiOpenFileMG;
+            egScore += sign * RookSemiOpenFileEG;
+        }
+    }
+}
+
+// Evaluate king safety for one color.  MG-only.
+// Combines pawn shield and attacker-based king danger.
+static void evalKingSafety(const Board& board, Color us, int sign, int& mgScore) {
+    Color them = ~us;
+    Square kingSq = lsb(board.pieces(us, King));
+    int kingFile = square_file(kingSq);
+    int kingRank = square_rank(kingSq);
+    Bitboard occ = board.all_pieces();
+    Bitboard ourPawns = board.pieces(us, Pawn);
+
+    // --- Pawn shield (only when king is on back ranks) ---
+    bool onBackRanks = (us == White) ? (kingRank <= 1) : (kingRank >= 6);
+    if (onBackRanks) {
+        int shieldRank = (us == White) ? kingRank + 1 : kingRank - 1;
+        if (shieldRank >= 0 && shieldRank <= 7) {
+            int missingShield = 0;
+            int minFile = (kingFile > 0) ? kingFile - 1 : 0;
+            int maxFile = (kingFile < 7) ? kingFile + 1 : 7;
+
+            for (int f = minFile; f <= maxFile; ++f) {
+                Square shieldSq = make_square(f, shieldRank);
+                if (!(ourPawns & square_bb(shieldSq)))
+                    ++missingShield;
+            }
+            mgScore += sign * PawnShieldPenaltyMG * missingShield;
+        }
+    }
+
+    // --- Attacker-based king danger ---
+    // King zone: squares the king attacks + the king square itself
+    Bitboard kingZone = attacks::king_attacks(kingSq) | square_bb(kingSq);
+
+    int attackWeight = 0;
+    int attackerCount = 0;
+
+    // Enemy knights attacking king zone
+    Bitboard enemyKnights = board.pieces(them, Knight);
+    while (enemyKnights) {
+        Square s = pop_lsb(enemyKnights);
+        if (attacks::knight_attacks(s) & kingZone) {
+            attackWeight += KingAttackerWeight[Knight];
+            ++attackerCount;
+        }
+    }
+
+    // Enemy bishops attacking king zone
+    Bitboard enemyBishops = board.pieces(them, Bishop);
+    while (enemyBishops) {
+        Square s = pop_lsb(enemyBishops);
+        if (attacks::bishop_attacks(s, occ) & kingZone) {
+            attackWeight += KingAttackerWeight[Bishop];
+            ++attackerCount;
+        }
+    }
+
+    // Enemy rooks attacking king zone
+    Bitboard enemyRooks = board.pieces(them, Rook);
+    while (enemyRooks) {
+        Square s = pop_lsb(enemyRooks);
+        if (attacks::rook_attacks(s, occ) & kingZone) {
+            attackWeight += KingAttackerWeight[Rook];
+            ++attackerCount;
+        }
+    }
+
+    // Enemy queens attacking king zone
+    Bitboard enemyQueens = board.pieces(them, Queen);
+    while (enemyQueens) {
+        Square s = pop_lsb(enemyQueens);
+        if (attacks::queen_attacks(s, occ) & kingZone) {
+            attackWeight += KingAttackerWeight[Queen];
+            ++attackerCount;
+        }
+    }
+
+    // Only apply danger penalty if 2+ pieces are attacking
+    if (attackerCount >= 2) {
+        int dangerIdx = attackWeight;
+        if (dangerIdx > 99) dangerIdx = 99;
+        mgScore -= sign * KingDangerTable[dangerIdx];
+    }
+}
+
+// ============================================================
+// Main evaluation function
+// ============================================================
 
 int evaluate(const Board& board) {
     int mgScore = 0;
     int egScore = 0;
     int phase = 0;
 
+    // 1. Material + PST (existing PeSTO tapered eval)
     for (int pt = Pawn; pt <= King; ++pt) {
-        // White pieces: use mirror(s) to convert PandaChess squares to CPW table index
         Bitboard bb = board.pieces(White, PieceType(pt));
         while (bb) {
             Square s = pop_lsb(bb);
-            int idx = mirror(s);  // A1=0 -> CPW a1 index
+            int idx = mirror(s);
             mgScore += MG_PIECE_VALUE[pt] + MG_PST[pt][idx];
             egScore += EG_PIECE_VALUE[pt] + EG_PST[pt][idx];
             phase += PHASE_WEIGHT[pt];
         }
 
-        // Black pieces: natural rank flip means we use s directly
         bb = board.pieces(Black, PieceType(pt));
         while (bb) {
             Square s = pop_lsb(bb);
-            int idx = s;  // Black's perspective is already mirrored
+            int idx = s;
             mgScore -= MG_PIECE_VALUE[pt] + MG_PST[pt][idx];
             egScore -= EG_PIECE_VALUE[pt] + EG_PST[pt][idx];
             phase += PHASE_WEIGHT[pt];
         }
     }
 
-    // Clamp phase to handle promotions creating extra material
+    // 2. Pawn structure (passed, isolated, doubled)
+    evalPawns(board, White, +1, mgScore, egScore);
+    evalPawns(board, Black, -1, mgScore, egScore);
+
+    // 3. Piece terms (bishop pair, rook on open file)
+    evalPieces(board, White, +1, mgScore, egScore);
+    evalPieces(board, Black, -1, mgScore, egScore);
+
+    // 4. King safety (pawn shield, MG only)
+    evalKingSafety(board, White, +1, mgScore);
+    evalKingSafety(board, Black, -1, mgScore);
+
+    // 5. Mobility
+    evalMobility(board, White, +1, mgScore, egScore);
+    evalMobility(board, Black, -1, mgScore, egScore);
+
+    // Clamp phase
     if (phase > TOTAL_PHASE)
         phase = TOTAL_PHASE;
 
-    // Tapered eval: interpolate between MG and EG scores
-    // phase=24 -> pure middlegame, phase=0 -> pure endgame
+    // Tapered interpolation
     int score = (mgScore * phase + egScore * (TOTAL_PHASE - phase)) / TOTAL_PHASE;
 
-    // Return relative to side to move
     return (board.side_to_move() == White) ? score : -score;
 }
 
