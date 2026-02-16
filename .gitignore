@@ -42,3 +42,6 @@ engine/build/
 
 # debug information files
 *.dwo
+
+# opencode produced cache files
+engine/.cache/

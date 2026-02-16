@@ -80,6 +80,64 @@ TEST(TTTest, Clear) {
     EXPECT_FALSE(tt.probe(key, entry));
 }
 
+TEST(TTTest, CollisionKeepsDeeperEntry) {
+    TranspositionTable tt(0);  // Force one-slot table (mask = 0)
+    uint64_t keyA = 0x123456789ABCDEF0ULL;
+    uint64_t keyB = 0x0FEDCBA987654321ULL;
+
+    tt.store(keyA, 100, 10, TT_ALPHA, make_move(E2, E4));
+    tt.store(keyB, 50, 4, TT_BETA, make_move(D2, D4));
+
+    TTEntry entry;
+    EXPECT_TRUE(tt.probe(keyA, entry));
+    EXPECT_FALSE(tt.probe(keyB, entry));
+}
+
+TEST(TTTest, CollisionPrefersExactAtEqualDepth) {
+    TranspositionTable tt(0);  // Force one-slot table (mask = 0)
+    uint64_t keyA = 0x1111111111111111ULL;
+    uint64_t keyB = 0x2222222222222222ULL;
+
+    tt.store(keyA, 10, 6, TT_ALPHA, make_move(E2, E4));
+    tt.store(keyB, 20, 6, TT_EXACT, make_move(D2, D4));
+
+    TTEntry entry;
+    EXPECT_FALSE(tt.probe(keyA, entry));
+    ASSERT_TRUE(tt.probe(keyB, entry));
+    EXPECT_EQ(entry.depth, 6);
+    EXPECT_EQ(entry.flag, TT_EXACT);
+}
+
+TEST(TTTest, CollisionReplacedWhenStale) {
+    TranspositionTable tt(0);  // Force one-slot table (mask = 0)
+    uint64_t keyA = 0x3333333333333333ULL;
+    uint64_t keyB = 0x4444444444444444ULL;
+
+    tt.store(keyA, 100, 10, TT_EXACT, make_move(E2, E4));
+    tt.new_search();
+    tt.new_search();
+    tt.store(keyB, 25, 2, TT_ALPHA, make_move(D2, D4));
+
+    TTEntry entry;
+    EXPECT_FALSE(tt.probe(keyA, entry));
+    EXPECT_TRUE(tt.probe(keyB, entry));
+}
+
+TEST(TTTest, SameKeyShallowerBoundDoesNotDegrade) {
+    TranspositionTable tt(1);
+    uint64_t key = 0x5555555555555555ULL;
+
+    tt.store(key, 120, 8, TT_EXACT, make_move(E2, E4));
+    tt.store(key, 80, 5, TT_ALPHA, make_move(D2, D4));
+
+    TTEntry entry;
+    ASSERT_TRUE(tt.probe(key, entry));
+    EXPECT_EQ(entry.depth, 8);
+    EXPECT_EQ(entry.flag, TT_EXACT);
+    EXPECT_EQ(entry.score, 120);
+    EXPECT_EQ(entry.bestMove, make_move(E2, E4));
+}
+
 // ============================================================
 // Evaluation tests
 // ============================================================

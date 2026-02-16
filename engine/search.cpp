@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "attacks.h"
 #include "eval.h"
 #include "movegen.h"
 
@@ -126,6 +127,120 @@ static bool isCapture(const Board& board, Move m) {
     return board.piece_on(move_to(m)) != NoPiece || move_type(m) == EnPassant;
 }
 
+static Bitboard attackersToSquare(const Bitboard pieces[2][6], Bitboard occupied, Square sq,
+                                  Color side) {
+    Bitboard attackers = 0;
+    attackers |= pieces[side][Pawn] & attacks::pawn_attacks(~side, sq);
+    attackers |= pieces[side][Knight] & attacks::knight_attacks(sq);
+    attackers |= pieces[side][Bishop] & attacks::bishop_attacks(sq, occupied);
+    attackers |= pieces[side][Rook] & attacks::rook_attacks(sq, occupied);
+    attackers |= pieces[side][Queen] & attacks::queen_attacks(sq, occupied);
+    attackers |= pieces[side][King] & attacks::king_attacks(sq);
+    return attackers;
+}
+
+static bool pickLeastValuableAttacker(const Bitboard pieces[2][6], Color side, Bitboard attackers,
+                                      Square& fromSq, PieceType& attackerPt) {
+    for (int pt = Pawn; pt <= King; ++pt) {
+        Bitboard bb = attackers & pieces[side][pt];
+        if (bb) {
+            fromSq = lsb(bb);
+            attackerPt = static_cast<PieceType>(pt);
+            return true;
+        }
+    }
+    return false;
+}
+
+// Static Exchange Evaluation from side-to-move perspective.
+// Positive means the capture sequence on `to` is favorable for side to move.
+static int staticExchangeEval(const Board& board, Move m) {
+    MoveType mt = move_type(m);
+    Square from = move_from(m);
+    Square to = move_to(m);
+
+    Piece moved = board.piece_on(from);
+    if (moved == NoPiece)
+        return 0;
+
+    Color us = board.side_to_move();
+    Color them = ~us;
+    PieceType movedPt = piece_type(moved);
+
+    Bitboard pieces[2][6];
+    for (int c = White; c <= Black; ++c) {
+        for (int pt = Pawn; pt <= King; ++pt) {
+            pieces[c][pt] = board.pieces(static_cast<Color>(c), static_cast<PieceType>(pt));
+        }
+    }
+
+    int capturedValue = 0;
+    Square capturedSq = to;
+    if (mt == EnPassant) {
+        capturedSq = make_square(square_file(to), square_rank(from));
+        pieces[them][Pawn] ^= square_bb(capturedSq);
+        capturedValue = PieceValue[Pawn];
+    } else {
+        Piece captured = board.piece_on(to);
+        if (captured != NoPiece) {
+            PieceType capturedPt = piece_type(captured);
+            pieces[them][capturedPt] ^= square_bb(to);
+            capturedValue = PieceValue[capturedPt];
+        }
+    }
+
+    int promotionGain = 0;
+    PieceType placedPt = movedPt;
+    if (mt == Promotion) {
+        PieceType promoPt = promotion_type(m);
+        promotionGain = PieceValue[promoPt] - PieceValue[Pawn];
+        placedPt = promoPt;
+    }
+
+    if (capturedValue == 0 && promotionGain == 0)
+        return 0;
+
+    Bitboard fromBB = square_bb(from);
+    Bitboard toBB = square_bb(to);
+    pieces[us][movedPt] ^= fromBB;
+    pieces[us][placedPt] |= toBB;
+
+    Bitboard occupied = board.all_pieces();
+    occupied ^= fromBB;
+    if (capturedValue > 0)
+        occupied ^= square_bb(capturedSq);
+    occupied |= toBB;
+
+    int gain[32];
+    gain[0] = capturedValue + promotionGain;
+    int depth = 0;
+    Color stm = them;
+
+    while (true) {
+        Bitboard attackers = attackersToSquare(pieces, occupied, to, stm);
+
+        Square attackerFrom = NoSquare;
+        PieceType attackerPt = Pawn;
+        if (!pickLeastValuableAttacker(pieces, stm, attackers, attackerFrom, attackerPt))
+            break;
+
+        ++depth;
+        gain[depth] = PieceValue[attackerPt] - gain[depth - 1];
+        if (std::max(-gain[depth - 1], gain[depth]) < 0)
+            break;
+
+        Bitboard attackerFromBB = square_bb(attackerFrom);
+        pieces[stm][attackerPt] ^= attackerFromBB;
+        occupied ^= attackerFromBB;
+        stm = ~stm;
+    }
+
+    for (int d = depth; d > 0; --d) {
+        gain[d - 1] = -std::max(-gain[d - 1], gain[d]);
+    }
+    return gain[0];
+}
+
 static int mvvLvaScore(const Board& board, Move m) {
     Square to = move_to(m);
     Square from = move_from(m);
@@ -144,6 +259,12 @@ static int mvvLvaScore(const Board& board, Move m) {
     return CAPTURE_BASE + victimVal * 10 - attackerVal;
 }
 
+static int captureScore(const Board& board, Move m) {
+    // SEE dominates tactical ordering; MVV-LVA keeps stable tie-breaks.
+    int see = staticExchangeEval(board, m);
+    return CAPTURE_BASE + see * 64 + mvvLvaScore(board, m);
+}
+
 static void scoreMoves(const Board& board, MoveList& moves, int* scores, Move ttMove,
                        const SearchState& state, int ply) {
     Color side = board.side_to_move();
@@ -153,7 +274,7 @@ static void scoreMoves(const Board& board, MoveList& moves, int* scores, Move tt
         if (m == ttMove && ttMove != NullMove) {
             scores[i] = TT_MOVE_SCORE;
         } else if (isCapture(board, m)) {
-            scores[i] = mvvLvaScore(board, m);
+            scores[i] = captureScore(board, m);
         } else if (ply < MAX_PLY && m == state.killers[ply][0]) {
             scores[i] = KILLER1_SCORE;
         } else if (ply < MAX_PLY && m == state.killers[ply][1]) {
@@ -184,7 +305,7 @@ static void pickBest(MoveList& moves, int* scores, int idx) {
 // Score captures only (for quiescence search)
 static void scoreCapturesMvvLva(const Board& board, MoveList& moves, int* scores) {
     for (int i = 0; i < moves.size(); ++i) {
-        scores[i] = mvvLvaScore(board, moves[i]);
+        scores[i] = captureScore(board, moves[i]);
     }
 }
 
@@ -229,6 +350,7 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
 
     int standPat = 0;
     bool inCheck = in_check(board);
+    bool pvNode = (beta - alpha > 1);
     MoveList allMoves = generate_legal(board);
     MoveList qmoves;
 
@@ -271,6 +393,13 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
         // Delta pruning: skip if the capture + margin can't possibly raise alpha
         // Only apply when not in check and we have a valid standPat
         if (!inCheck) {
+            // SEE-based pruning in non-PV qsearch nodes.
+            // Keep promotions to avoid pruning tactical promotion races.
+            if (!pvNode && move_type(m) != Promotion) {
+                int see = staticExchangeEval(board, m);
+                if (see < 0 && standPat + see + DELTA_MARGIN < alpha)
+                    continue;
+            }
             if (standPat + captureValue(board, m) + DELTA_MARGIN < alpha)
                 continue;
         }
@@ -500,8 +629,9 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
             score =
                 -negamax(board, reducedDepth, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
 
-            // Re-search at full depth with zero window if it beats alpha
-            if (!state.stopped && score > alpha) {
+            // Re-search at full depth with zero window if scout search reaches alpha.
+            // Use >= with fail-hard returns.
+            if (!state.stopped && score >= alpha) {
                 score =
                     -negamax(board, depth - 1, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
             }
@@ -514,8 +644,9 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
             score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
         }
 
-        // PVS full-window re-search if zero-window found a better move
-        if (!state.stopped && i > 0 && score > alpha && score < beta) {
+        // PVS full-window re-search when scout search reaches alpha.
+        // Use >= with fail-hard returns.
+        if (!state.stopped && i > 0 && score >= alpha && score < beta) {
             score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
         }
         board.unmake_move(m, undo);
@@ -627,6 +758,7 @@ static SearchResult searchRoot(Board& board, int depth, int alpha, int beta, Sea
 // ============================================================
 
 SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt) {
+    tt.new_search();
     SearchState state(tt);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = timeLimitMs;
@@ -679,6 +811,7 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
 }
 
 SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) {
+    tt.new_search();
     SearchState state(tt);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = 0;  // 0 means no time limit
@@ -723,6 +856,7 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
 SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
                     std::atomic<bool>& stopFlag, const std::vector<uint64_t>& repetitionHistory,
                     InfoCallback infoCallback) {
+    tt.new_search();
     SearchState state(tt, &stopFlag);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = timeLimitMs;

@@ -109,7 +109,7 @@ Includes:
   - King attacks
 - Sliding attack support:
   - Magic metadata structs/tables are initialized
-  - Runtime attack functions currently use `sliding_attack(...)` for bishops/rooks (and queens via composition in headers)
+  - Runtime bishop/rook attack lookups use precomputed magic tables (queen via composition in headers)
 - Initialization entrypoint:
   - `attacks::init()`
 

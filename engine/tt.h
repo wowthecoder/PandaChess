@@ -19,12 +19,14 @@ struct TTEntry {
     int depth;
     TTFlag flag;
     Move bestMove;
+    uint8_t generation;
 };
 
 class TranspositionTable {
    public:
     explicit TranspositionTable(size_t sizeMB = 64);
 
+    void new_search();
     void store(uint64_t key, int score, int depth, TTFlag flag, Move bestMove);
     bool probe(uint64_t key, TTEntry& entry) const;
     void clear();
@@ -33,6 +35,7 @@ class TranspositionTable {
    private:
     std::vector<TTEntry> table;
     size_t mask;  // size - 1, for fast modulo (size is power of 2)
+    uint8_t currentGeneration;
 };
 
 }  // namespace panda
