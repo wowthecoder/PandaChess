@@ -51,4 +51,9 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
 // Extract principal variation from transposition table
 std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxLen);
 
+// Test helper: run quiescence from the given position.
+// Uses internal search state initialization (repetition/time defaults).
+int quiescenceForTests(const Board& board, int alpha, int beta,
+                       const std::vector<uint64_t>& repetitionHistory = {});
+
 }  // namespace panda

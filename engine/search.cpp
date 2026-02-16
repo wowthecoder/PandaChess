@@ -224,6 +224,9 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
     if (isThreefoldRepetition(board, state, repIndex))
         return 0;
 
+    if (is_draw_by_fifty_move_rule(board))
+        return 0;
+
     int standPat = 0;
     bool inCheck = in_check(board);
     MoveList allMoves = generate_legal(board);
@@ -232,6 +235,10 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
     if (inCheck) {
         qmoves = allMoves;
     } else {
+        // True stalemate: no legal moves at all and not in check
+        if (allMoves.size() == 0)
+            return 0;
+
         // Stand pat only if not in check
         standPat = evaluate(board);
 
@@ -246,11 +253,11 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
         }
     }
 
-    // Check for checkmate/stalemate
+    // Check for checkmate (in check with no legal moves) or no captures
     if (qmoves.size() == 0) {
         if (inCheck)
             return -MATE_SCORE + ply;  // Checkmate: lose in 'ply' half-moves
-        return alpha;                  // Stalemate
+        return alpha;                  // No captures; stand pat
     }
 
     // MVV-LVA ordering for captures
@@ -359,6 +366,8 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
     if (is_draw_by_fifty_move_rule(board))
         return 0;
 
+    bool pvNode = (beta - alpha > 1);
+
     // TT probe
     TTEntry ttEntry;
     Move ttMove = NullMove;
@@ -366,12 +375,16 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
         ttMove = ttEntry.bestMove;
         if (ttEntry.depth >= depth) {
             int ttScore = scoreFromTT(ttEntry.score, ply);
+            // In PV nodes, only allow exact cutoffs to preserve the principal variation.
+            // In non-PV nodes, allow all cutoff types.
             if (ttEntry.flag == TT_EXACT)
                 return ttScore;
-            if (ttEntry.flag == TT_BETA && ttScore >= beta)
-                return ttScore;
-            if (ttEntry.flag == TT_ALPHA && ttScore <= alpha)
-                return ttScore;
+            if (!pvNode) {
+                if (ttEntry.flag == TT_BETA && ttScore >= beta)
+                    return ttScore;
+                if (ttEntry.flag == TT_ALPHA && ttScore <= alpha)
+                    return ttScore;
+            }
         }
     }
 
@@ -389,7 +402,6 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
     }
 
     bool inCheck = in_check(board);
-    bool pvNode = (beta - alpha > 1);
     int staticEval = evaluate(board);
 
     // Reverse futility pruning (static null move pruning)
@@ -475,6 +487,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
                      !isPromotion;
 
         if (doLMR) {
+            // LMR: reduced-depth zero-window search
             int d = depth - 1;
             int mi = (i < 64) ? i : 63;
             int reduction = lmrTable[(d < 64) ? d : 63][mi];
@@ -484,7 +497,6 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
             if (reducedDepth < 0)
                 reducedDepth = 0;
 
-            // Reduced-depth zero-window search
             score =
                 -negamax(board, reducedDepth, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
 
@@ -493,12 +505,17 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
                 score =
                     -negamax(board, depth - 1, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
             }
-
-            // Full window re-search if it still beats alpha (PVS-style)
-            if (!state.stopped && score > alpha && score < beta) {
-                score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
-            }
+        } else if (i > 0) {
+            // PVS: zero-window search for non-first moves
+            score =
+                -negamax(board, depth - 1, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
         } else {
+            // First move: full window search
+            score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
+        }
+
+        // PVS full-window re-search if zero-window found a better move
+        if (!state.stopped && i > 0 && score > alpha && score < beta) {
             score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
         }
         board.unmake_move(m, undo);
@@ -786,6 +803,18 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
     }
 
     return bestResult;
+}
+
+int quiescenceForTests(const Board& board, int alpha, int beta,
+                       const std::vector<uint64_t>& repetitionHistory) {
+    TranspositionTable tt(1);
+    SearchState state(tt);
+    state.startTime = std::chrono::steady_clock::now();
+    state.timeLimitMs = 0;
+    initRepetitionHistory(state, board, repetitionHistory);
+
+    Board copy = board;
+    return quiescence(copy, alpha, beta, state, 0, state.rootRepIndex);
 }
 
 }  // namespace panda

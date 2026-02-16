@@ -267,6 +267,24 @@ TEST(SearchTest, QuiescenceMateDistanceConsistentAcrossDepths) {
     EXPECT_EQ(d2.score, d3.score);
 }
 
+TEST(SearchTest, QuiescenceStalemateReturnsDraw) {
+    // Black to move is stalemated.
+    Board board;
+    board.set_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
+
+    int score = quiescenceForTests(board, -MATE_SCORE, MATE_SCORE);
+    EXPECT_EQ(score, 0);
+}
+
+TEST(SearchTest, QuiescenceHonorsFiftyMoveRule) {
+    // Rule-50 draw should score as draw at qsearch entry.
+    Board board;
+    board.set_fen("4k3/8/8/8/8/8/8/4KR2 w - - 100 1");
+
+    int score = quiescenceForTests(board, -MATE_SCORE, MATE_SCORE);
+    EXPECT_EQ(score, 0);
+}
+
 // ============================================================
 // Threefold repetition tests
 // ============================================================

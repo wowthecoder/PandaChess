@@ -488,9 +488,8 @@ Iterative Deepening
 
 ## TODO
 
-1. Principle Variation Search
 2. Static Exchange Evaluation
-3. Better heuristics (tapered evaluation, NNUE)
+3. Better heuristics (NNUE)
 4. https://www.chessprogramming.org/Sequential_Probability_Ratio_Test
 5. Implement proper Verified NMP as detailed here: https://arxiv.org/pdf/0808.1125
 6. conform to various time controls
