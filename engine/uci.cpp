@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "attacks.h"
 #include "board.h"
@@ -75,12 +76,14 @@ static Move parseUCIMove(const Board& board, const std::string& str) {
 }
 
 // Handle "position" command
-static void parsePosition(Board& board, std::istringstream& iss) {
+static void parsePosition(Board& board, std::istringstream& iss, std::vector<uint64_t>& history) {
     std::string token;
     iss >> token;
 
     if (token == "startpos") {
         board.set_fen(StartFEN);
+        history.clear();
+        history.push_back(board.hash_key());
         iss >> token;  // consume "moves" if present
     } else if (token == "fen") {
         std::string fen;
@@ -93,6 +96,8 @@ static void parsePosition(Board& board, std::istringstream& iss) {
             fen += token;
         }
         board.set_fen(fen);
+        history.clear();
+        history.push_back(board.hash_key());
         // token may already be "moves" from the loop above
         if (token != "moves")
             iss >> token;
@@ -104,13 +109,15 @@ static void parsePosition(Board& board, std::istringstream& iss) {
             Move m = parseUCIMove(board, token);
             if (m != NullMove) {
                 board.make_move(m);
+                history.push_back(board.hash_key());
             }
         }
     }
 }
 
 // Handle "go" command
-static void parseGoAndSearch(const Board& board, std::istringstream& iss, TranspositionTable& tt,
+static void parseGoAndSearch(const Board& board, const std::vector<uint64_t>& history,
+                             std::istringstream& iss, TranspositionTable& tt,
                              std::atomic<bool>& stopFlag, std::thread& searchThread) {
     int wtime = 0, btime = 0, winc = 0, binc = 0;
     int movetime = 0;
@@ -167,9 +174,10 @@ static void parseGoAndSearch(const Board& board, std::istringstream& iss, Transp
 
     // Copy the board for the search thread
     Board searchBoard = board;
+    std::vector<uint64_t> searchHistory = history;
     stopFlag.store(false, std::memory_order_relaxed);
 
-    searchThread = std::thread([searchBoard, timeLimitMs, maxDepth, &tt, &stopFlag]() {
+    searchThread = std::thread([searchBoard, searchHistory, timeLimitMs, maxDepth, &tt, &stopFlag]() {
         auto infoCb = [&tt](const SearchInfo& info) {
             std::cout << "info depth " << info.depth;
             if (info.isMate) {
@@ -191,7 +199,8 @@ static void parseGoAndSearch(const Board& board, std::istringstream& iss, Transp
             std::cout << std::endl;
         };
 
-        SearchResult result = search(searchBoard, timeLimitMs, maxDepth, tt, stopFlag, infoCb);
+        SearchResult result =
+            search(searchBoard, timeLimitMs, maxDepth, tt, stopFlag, searchHistory, infoCb);
 
         if (result.bestMove == NullMove) {
             std::cout << "bestmove 0000" << std::endl;
@@ -208,6 +217,7 @@ void uci_loop() {
 
     Board board;
     board.set_fen(StartFEN);
+    std::vector<uint64_t> history{board.hash_key()};
 
     TranspositionTable tt(64);  // 64 MB default
     std::atomic<bool> stopFlag{false};
@@ -234,15 +244,17 @@ void uci_loop() {
             }
             tt.clear();
             board.set_fen(StartFEN);
+            history.clear();
+            history.push_back(board.hash_key());
         } else if (cmd == "position") {
-            parsePosition(board, iss);
+            parsePosition(board, iss, history);
         } else if (cmd == "go") {
             // Wait for any previous search to finish
             if (searchThread.joinable()) {
                 stopFlag.store(true, std::memory_order_relaxed);
                 searchThread.join();
             }
-            parseGoAndSearch(board, iss, tt, stopFlag, searchThread);
+            parseGoAndSearch(board, history, iss, tt, stopFlag, searchThread);
         } else if (cmd == "stop") {
             stopFlag.store(true, std::memory_order_relaxed);
             if (searchThread.joinable())

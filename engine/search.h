@@ -43,6 +43,11 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt);
 SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
                     std::atomic<bool>& stopFlag, InfoCallback infoCallback = nullptr);
 
+// UCI-friendly search with repetition history (hashes from game start to current position).
+SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
+                    std::atomic<bool>& stopFlag, const std::vector<uint64_t>& repetitionHistory,
+                    InfoCallback infoCallback = nullptr);
+
 // Extract principal variation from transposition table
 std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxLen);
 

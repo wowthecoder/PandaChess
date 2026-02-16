@@ -21,6 +21,26 @@ class SearchTestEnvironment : public ::testing::Environment {
     }
 };
 
+static Move findMoveByUci(const Board& board, const std::string& uci) {
+    MoveList legal = generate_legal(board);
+    for (int i = 0; i < legal.size(); ++i) {
+        Move m = legal[i];
+        if (move_to_uci(m) == uci)
+            return m;
+    }
+    return NullMove;
+}
+
+static void applyUciSequence(Board& board, std::vector<uint64_t>& history,
+                             const std::vector<std::string>& sequence) {
+    for (const std::string& uci : sequence) {
+        Move m = findMoveByUci(board, uci);
+        ASSERT_NE(m, NullMove) << "Illegal move in test sequence: " << uci;
+        board.make_move(m);
+        history.push_back(board.hash_key());
+    }
+}
+
 // ============================================================
 // Transposition Table tests
 // ============================================================
@@ -245,6 +265,39 @@ TEST(SearchTest, QuiescenceMateDistanceConsistentAcrossDepths) {
 
     EXPECT_GT(d3.score, MATE_SCORE - MAX_PLY);
     EXPECT_EQ(d2.score, d3.score);
+}
+
+// ============================================================
+// Threefold repetition tests
+// ============================================================
+
+TEST(SearchTest, ThreefoldRepetitionEvaluatesAsDraw) {
+    Board board;
+    board.set_fen("4k3/8/8/8/8/8/8/4KR2 w - - 0 1");
+
+    std::vector<uint64_t> history{board.hash_key()};
+    applyUciSequence(board, history, {"f1f2", "e8e7", "f2f1", "e7e8", "f1f2", "e8e7", "f2f1", "e7e8"});
+
+    TranspositionTable tt(1);
+    std::atomic<bool> stopFlag{false};
+    SearchResult result = search(board, 0, 4, tt, stopFlag, history);
+
+    EXPECT_EQ(result.score, 0);
+    EXPECT_NE(result.bestMove, NullMove);
+}
+
+TEST(SearchTest, TwofoldRepetitionIsNotForcedDraw) {
+    Board board;
+    board.set_fen("4k3/8/8/8/8/8/8/4KR2 w - - 0 1");
+
+    std::vector<uint64_t> history{board.hash_key()};
+    applyUciSequence(board, history, {"f1f2", "e8e7", "f2f1", "e7e8"});
+
+    TranspositionTable tt(1);
+    std::atomic<bool> stopFlag{false};
+    SearchResult result = search(board, 0, 4, tt, stopFlag, history);
+
+    EXPECT_GT(result.score, 200);
 }
 
 int main(int argc, char** argv) {

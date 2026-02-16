@@ -15,6 +15,8 @@ struct SearchState {
     TranspositionTable& tt;
     Move killers[MAX_PLY][2];  // 2 killer moves per ply
     int history[2][64][64];    // [color][from][to] history scores
+    std::vector<uint64_t> repetitionHistory;
+    int rootRepIndex;
     std::chrono::steady_clock::time_point startTime;
     int timeLimitMs;
     bool stopped;
@@ -22,7 +24,12 @@ struct SearchState {
     uint64_t nodes;
 
     explicit SearchState(TranspositionTable& tt_, std::atomic<bool>* extStop = nullptr)
-        : tt(tt_), timeLimitMs(0), stopped(false), externalStop(extStop), nodes(0) {
+        : tt(tt_),
+          rootRepIndex(0),
+          timeLimitMs(0),
+          stopped(false),
+          externalStop(extStop),
+          nodes(0) {
         clear();
     }
 
@@ -31,6 +38,8 @@ struct SearchState {
         std::memset(history, 0, sizeof(history));
         stopped = false;
         nodes = 0;
+        repetitionHistory.clear();
+        rootRepIndex = 0;
     }
 
     bool checkTime() {
@@ -51,6 +60,36 @@ struct SearchState {
         return false;
     }
 };
+
+static void initRepetitionHistory(SearchState& state, const Board& board,
+                                  const std::vector<uint64_t>& history) {
+    state.repetitionHistory = history;
+    if (state.repetitionHistory.empty() || state.repetitionHistory.back() != board.hash_key()) {
+        state.repetitionHistory.push_back(board.hash_key());
+    }
+    state.rootRepIndex = static_cast<int>(state.repetitionHistory.size()) - 1;
+}
+
+static bool isThreefoldRepetition(const Board& board, const SearchState& state, int repIndex) {
+    if (repIndex < 0 || repIndex >= static_cast<int>(state.repetitionHistory.size()))
+        return false;
+    if (board.halfmove_clock() < 4)
+        return false;
+
+    uint64_t key = board.hash_key();
+    int count = 1;
+    int maxBack = std::min(board.halfmove_clock(), repIndex);
+
+    // Same-side positions occur every 2 plies.
+    for (int i = repIndex - 2; i >= 0 && (repIndex - i) <= maxBack; i -= 2) {
+        if (state.repetitionHistory[i] == key) {
+            ++count;
+            if (count >= 3)
+                return true;
+        }
+    }
+    return false;
+}
 
 // ============================================================
 // Move ordering
@@ -174,12 +213,16 @@ static int captureValue(const Board& board, Move m) {
     return value;
 }
 
-static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply) {
+static int quiescence(const Board& board, int alpha, int beta, SearchState& state, int ply,
+                      int repIndex) {
     if (state.stopped)
         return 0;
     if (state.checkTime())
         return 0;
     ++state.nodes;
+
+    if (isThreefoldRepetition(board, state, repIndex))
+        return 0;
 
     bool inCheck = in_check(board);
     MoveList allMoves = generate_legal(board);
@@ -227,8 +270,13 @@ static int quiescence(const Board& board, int alpha, int beta, SearchState& stat
 
         Board child = board;
         child.make_move(m);
+        int childRepIndex = repIndex + 1;
+        if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
+            state.repetitionHistory.push_back(child.hash_key());
+        else
+            state.repetitionHistory[childRepIndex] = child.hash_key();
 
-        int score = -quiescence(child, -beta, -alpha, state, ply + 1);
+        int score = -quiescence(child, -beta, -alpha, state, ply + 1, childRepIndex);
 
         if (state.stopped)
             return 0;
@@ -293,7 +341,7 @@ static int scoreFromTT(int score, int ply) {
 // ============================================================
 
 static int negamax(const Board& board, int depth, int alpha, int beta, SearchState& state, int ply,
-                   bool allowNullMove = true) {
+                   int repIndex, bool allowNullMove = true) {
     if (state.stopped)
         return 0;
 
@@ -302,6 +350,9 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
         return 0;
 
     ++state.nodes;
+
+    if (isThreefoldRepetition(board, state, repIndex))
+        return 0;
 
     MoveList moves = generate_legal(board);
 
@@ -334,7 +385,7 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
 
     // Base case: quiescence search
     if (depth == 0)
-        return quiescence(board, alpha, beta, state, ply);
+        return quiescence(board, alpha, beta, state, ply, repIndex);
 
     bool inCheck = in_check(board);
     bool pvNode = (beta - alpha > 1);
@@ -358,8 +409,14 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
         int nullDepth = depth - 1 - reduction;
         if (nullDepth < 0)
             nullDepth = 0;
+        int nullRepIndex = repIndex + 1;
+        if (nullRepIndex >= static_cast<int>(state.repetitionHistory.size()))
+            state.repetitionHistory.push_back(nullChild.hash_key());
+        else
+            state.repetitionHistory[nullRepIndex] = nullChild.hash_key();
 
-        int nullScore = -negamax(nullChild, nullDepth, -beta, -beta + 1, state, ply + 1, false);
+        int nullScore =
+            -negamax(nullChild, nullDepth, -beta, -beta + 1, state, ply + 1, nullRepIndex, false);
 
         if (state.stopped)
             return 0;
@@ -368,7 +425,8 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
             // Verified null move pruning at deeper nodes
             if (depth >= NMP_VERIFY_DEPTH) {
                 // Re-search at reduced depth with null moves disabled to verify
-                int verifyScore = negamax(board, depth - 1, beta - 1, beta, state, ply, false);
+                int verifyScore =
+                    negamax(board, depth - 1, beta - 1, beta, state, ply, repIndex, false);
                 if (state.stopped)
                     return 0;
                 if (verifyScore >= beta)
@@ -402,6 +460,11 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
 
         Board child = board;
         child.make_move(m);
+        int childRepIndex = repIndex + 1;
+        if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
+            state.repetitionHistory.push_back(child.hash_key());
+        else
+            state.repetitionHistory[childRepIndex] = child.hash_key();
 
         int score;
 
@@ -420,19 +483,21 @@ static int negamax(const Board& board, int depth, int alpha, int beta, SearchSta
                 reducedDepth = 0;
 
             // Reduced-depth zero-window search
-            score = -negamax(child, reducedDepth, -alpha - 1, -alpha, state, ply + 1);
+            score = -negamax(child, reducedDepth, -alpha - 1, -alpha, state, ply + 1,
+                             childRepIndex);
 
             // Re-search at full depth with zero window if it beats alpha
             if (!state.stopped && score > alpha) {
-                score = -negamax(child, depth - 1, -alpha - 1, -alpha, state, ply + 1);
+                score =
+                    -negamax(child, depth - 1, -alpha - 1, -alpha, state, ply + 1, childRepIndex);
             }
 
             // Full window re-search if it still beats alpha (PVS-style)
             if (!state.stopped && score > alpha && score < beta) {
-                score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1);
+                score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
             }
         } else {
-            score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1);
+            score = -negamax(child, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
         }
 
         if (state.stopped)
@@ -478,6 +543,9 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
         return {NullMove, 0};                // stalemate
     }
 
+    if (isThreefoldRepetition(board, state, state.rootRepIndex))
+        return {moves[0], 0};
+
     // TT move ordering at root
     TTEntry ttEntry;
     Move ttMove = NullMove;
@@ -496,8 +564,13 @@ static SearchResult searchRoot(const Board& board, int depth, int alpha, int bet
 
         Board child = board;
         child.make_move(m);
+        int childRepIndex = state.rootRepIndex + 1;
+        if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
+            state.repetitionHistory.push_back(child.hash_key());
+        else
+            state.repetitionHistory[childRepIndex] = child.hash_key();
 
-        int score = -negamax(child, depth - 1, -beta, -alpha, state, 1);
+        int score = -negamax(child, depth - 1, -beta, -alpha, state, 1, childRepIndex);
 
         if (state.stopped)
             break;
@@ -537,6 +610,7 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
     SearchState state(tt);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = timeLimitMs;
+    initRepetitionHistory(state, board, {});
 
     SearchResult bestResult = {NullMove, 0};
 
@@ -587,6 +661,7 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) 
     SearchState state(tt);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = 0;  // 0 means no time limit
+    initRepetitionHistory(state, board, {});
 
     if (depth < 1)
         depth = 1;
@@ -620,9 +695,16 @@ std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxL
 
 SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
                     std::atomic<bool>& stopFlag, InfoCallback infoCallback) {
+    return search(board, timeLimitMs, maxDepth, tt, stopFlag, {}, infoCallback);
+}
+
+SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
+                    std::atomic<bool>& stopFlag, const std::vector<uint64_t>& repetitionHistory,
+                    InfoCallback infoCallback) {
     SearchState state(tt, &stopFlag);
     state.startTime = std::chrono::steady_clock::now();
     state.timeLimitMs = timeLimitMs;
+    initRepetitionHistory(state, board, repetitionHistory);
 
     SearchResult bestResult = {NullMove, 0};
 
