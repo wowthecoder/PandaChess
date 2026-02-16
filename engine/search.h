@@ -48,6 +48,11 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
                     std::atomic<bool>& stopFlag, const std::vector<uint64_t>& repetitionHistory,
                     InfoCallback infoCallback = nullptr);
 
+// UCI-friendly search with Lazy SMP (multiple threads).
+SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
+                    std::atomic<bool>& stopFlag, const std::vector<uint64_t>& repetitionHistory,
+                    int numThreads, InfoCallback infoCallback = nullptr);
+
 // Extract principal variation from transposition table
 std::vector<Move> extractPV(const Board& board, TranspositionTable& tt, int maxLen);
 

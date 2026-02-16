@@ -115,3 +115,7 @@ Right now I am playing my engine against stock fish, and I noticed the following
 2. Hash table usage: Also increasing as the game goes on, first 35 moves is lower than stockfish (stockfish is consistenly getting 80-90%, while my engine started from 30% and grew to 90% beyond move 35)
 3. Search depth: My engine mostly stops at depth 9, only in the late game it started going up to 11 and 12. In contrast stockfish manages to get to depth 22-30 (some numbers are reported in slashes idk why, like 22/30, 32/16). Did i just not report my search depth in UCI correctly?
 4.  I am playing tournament format 40 moves in 5 mins, and my engine divides the time evenly (7.5s per move). Stockfish took 22s on the very first move and most of the subsequent moves are much faster (2-5s), with a few moves taking longer. How is this adaptive time search implemented?
+
+
+-engine cmd=./panda-chess option.Threads=8
+Default is 4 threads

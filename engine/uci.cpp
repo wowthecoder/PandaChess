@@ -118,7 +118,8 @@ static void parsePosition(Board& board, std::istringstream& iss, std::vector<uin
 // Handle "go" command
 static void parseGoAndSearch(const Board& board, const std::vector<uint64_t>& history,
                              std::istringstream& iss, TranspositionTable& tt,
-                             std::atomic<bool>& stopFlag, std::thread& searchThread) {
+                             std::atomic<bool>& stopFlag, std::thread& searchThread,
+                             int numThreads) {
     int wtime = 0, btime = 0, winc = 0, binc = 0;
     int movetime = 0;
     int movestogo = 0;
@@ -177,7 +178,8 @@ static void parseGoAndSearch(const Board& board, const std::vector<uint64_t>& hi
     std::vector<uint64_t> searchHistory = history;
     stopFlag.store(false, std::memory_order_relaxed);
 
-    searchThread = std::thread([searchBoard, searchHistory, timeLimitMs, maxDepth, &tt, &stopFlag]() {
+    searchThread = std::thread([searchBoard, searchHistory, timeLimitMs, maxDepth, numThreads, &tt,
+                                &stopFlag]() {
         auto infoCb = [&tt](const SearchInfo& info) {
             std::cout << "info depth " << info.depth;
             if (info.isMate) {
@@ -199,8 +201,8 @@ static void parseGoAndSearch(const Board& board, const std::vector<uint64_t>& hi
             std::cout << std::endl;
         };
 
-        SearchResult result =
-            search(searchBoard, timeLimitMs, maxDepth, tt, stopFlag, searchHistory, infoCb);
+        SearchResult result = search(searchBoard, timeLimitMs, maxDepth, tt, stopFlag,
+                                     searchHistory, numThreads, infoCb);
 
         if (result.bestMove == NullMove) {
             std::cout << "bestmove 0000" << std::endl;
@@ -222,6 +224,7 @@ void uci_loop() {
     TranspositionTable tt(64);  // 64 MB default
     std::atomic<bool> stopFlag{false};
     std::thread searchThread;
+    int numThreads = 4;
 
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -233,6 +236,8 @@ void uci_loop() {
             std::cout << "id name " << ENGINE_NAME << std::endl;
             std::cout << "id author " << ENGINE_AUTHOR << std::endl;
             std::cout << "option name Hash type spin default 64 min 1 max 4096" << std::endl;
+            std::cout << "option name Threads type spin default " << 4
+                      << " min 1 max 256" << std::endl;
             std::cout << "uciok" << std::endl;
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
@@ -254,7 +259,7 @@ void uci_loop() {
                 stopFlag.store(true, std::memory_order_relaxed);
                 searchThread.join();
             }
-            parseGoAndSearch(board, history, iss, tt, stopFlag, searchThread);
+            parseGoAndSearch(board, history, iss, tt, stopFlag, searchThread, numThreads);
         } else if (cmd == "stop") {
             stopFlag.store(true, std::memory_order_relaxed);
             if (searchThread.joinable())
@@ -275,6 +280,13 @@ void uci_loop() {
                     if (sizeMB > 4096)
                         sizeMB = 4096;
                     tt = TranspositionTable(static_cast<size_t>(sizeMB));
+                } else if (name == "Threads") {
+                    int threads = std::stoi(value);
+                    if (threads < 1)
+                        threads = 1;
+                    if (threads > 256)
+                        threads = 256;
+                    numThreads = threads;
                 }
             }
         } else if (cmd == "quit") {

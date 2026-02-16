@@ -5,6 +5,8 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <thread>
+#include <vector>
 
 #include "attacks.h"
 #include "eval.h"
@@ -23,14 +25,17 @@ struct SearchState {
     bool stopped;
     std::atomic<bool>* externalStop;  // set by UCI "stop" command
     uint64_t nodes;
+    std::atomic<uint64_t>* sharedNodes;  // shared across all SMP threads
 
-    explicit SearchState(TranspositionTable& tt_, std::atomic<bool>* extStop = nullptr)
+    explicit SearchState(TranspositionTable& tt_, std::atomic<bool>* extStop = nullptr,
+                         std::atomic<uint64_t>* shared = nullptr)
         : tt(tt_),
           rootRepIndex(0),
           timeLimitMs(0),
           stopped(false),
           externalStop(extStop),
-          nodes(0) {
+          nodes(0),
+          sharedNodes(shared) {
         clear();
     }
 
@@ -341,6 +346,8 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
     if (state.checkTime())
         return 0;
     ++state.nodes;
+    if (state.sharedNodes)
+        state.sharedNodes->fetch_add(1, std::memory_order_relaxed);
 
     if (isThreefoldRepetition(board, state, repIndex))
         return 0;
@@ -487,6 +494,8 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
         return 0;
 
     ++state.nodes;
+    if (state.sharedNodes)
+        state.sharedNodes->fetch_add(1, std::memory_order_relaxed);
 
     if (isThreefoldRepetition(board, state, repIndex))
         return 0;
@@ -934,6 +943,143 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
 
         if (bestResult.score > MATE_SCORE - MAX_PLY || bestResult.score < -MATE_SCORE + MAX_PLY)
             break;
+    }
+
+    return bestResult;
+}
+
+SearchResult search(const Board& board, int timeLimitMs, int maxDepth, TranspositionTable& tt,
+                    std::atomic<bool>& stopFlag, const std::vector<uint64_t>& repetitionHistory,
+                    int numThreads, InfoCallback infoCallback) {
+    if (numThreads <= 1) {
+        return search(board, timeLimitMs, maxDepth, tt, stopFlag, repetitionHistory, infoCallback);
+    }
+
+    tt.new_search();
+
+    std::atomic<uint64_t> totalNodes{0};
+    auto startTime = std::chrono::steady_clock::now();
+
+    // Helper thread worker: runs iterative deepening with a depth offset for diversification.
+    // Uses the shared TT and stopFlag but has its own SearchState.
+    auto workerFunc = [&](int threadId) {
+        SearchState state(tt, &stopFlag, &totalNodes);
+        state.startTime = startTime;
+        state.timeLimitMs = timeLimitMs;
+        initRepetitionHistory(state, board, repetitionHistory);
+        Board root = board;
+
+        int workerMaxDepth = (maxDepth < 1) ? MAX_PLY : maxDepth;
+
+        for (int depth = 1; depth <= workerMaxDepth; ++depth) {
+            // Depth diversification: even threads search deeper, odd threads shallower
+            int adjustedDepth = depth;
+            if (threadId % 2 == 0) {
+                adjustedDepth = depth + (threadId / 2);
+            } else {
+                adjustedDepth = depth - (threadId / 2);
+            }
+            if (adjustedDepth < 1)
+                continue;
+            if (adjustedDepth > workerMaxDepth)
+                break;
+
+            if (state.stopped || stopFlag.load(std::memory_order_relaxed))
+                break;
+
+            searchRoot(root, adjustedDepth, -MATE_SCORE - 1, MATE_SCORE + 1, state);
+
+            if (state.stopped)
+                break;
+        }
+    };
+
+    // Launch helper threads (threads 1..N-1)
+    std::vector<std::thread> helpers;
+    helpers.reserve(numThreads - 1);
+    for (int i = 1; i < numThreads; ++i) {
+        helpers.emplace_back(workerFunc, i);
+    }
+
+    // Main thread (thread 0): runs normal iterative deepening with aspiration windows
+    SearchState mainState(tt, &stopFlag, &totalNodes);
+    mainState.startTime = startTime;
+    mainState.timeLimitMs = timeLimitMs;
+    initRepetitionHistory(mainState, board, repetitionHistory);
+    Board root = board;
+
+    SearchResult bestResult = {NullMove, 0};
+    int effectiveMaxDepth = (maxDepth < 1) ? MAX_PLY : maxDepth;
+
+    for (int depth = 1; depth <= effectiveMaxDepth; ++depth) {
+        SearchResult result;
+
+        if (depth <= 1) {
+            result = searchRoot(root, depth, -MATE_SCORE - 1, MATE_SCORE + 1, mainState);
+        } else {
+            int delta = ASPIRATION_WINDOW;
+            int alpha = bestResult.score - delta;
+            int beta = bestResult.score + delta;
+
+            while (true) {
+                result = searchRoot(root, depth, alpha, beta, mainState);
+                if (mainState.stopped)
+                    break;
+
+                if (result.score <= alpha) {
+                    alpha = (alpha - delta > -MATE_SCORE - 1) ? alpha - delta : -MATE_SCORE - 1;
+                    delta *= 2;
+                } else if (result.score >= beta) {
+                    beta = (beta + delta < MATE_SCORE + 1) ? beta + delta : MATE_SCORE + 1;
+                    delta *= 2;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (mainState.stopped) {
+            if (depth == 1 && result.bestMove != NullMove)
+                bestResult = result;
+            break;
+        }
+        bestResult = result;
+
+        if (infoCallback) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
+
+            SearchInfo info;
+            info.depth = depth;
+            info.score = bestResult.score;
+            info.nodes = totalNodes.load(std::memory_order_relaxed);
+            info.timeMs = elapsed;
+            info.pv = extractPV(board, tt, depth);
+
+            if (bestResult.score > MATE_SCORE - MAX_PLY) {
+                info.isMate = true;
+                info.mateInPly = (MATE_SCORE - bestResult.score + 1) / 2;
+            } else if (bestResult.score < -MATE_SCORE + MAX_PLY) {
+                info.isMate = true;
+                info.mateInPly = -((MATE_SCORE + bestResult.score + 1) / 2);
+            } else {
+                info.isMate = false;
+                info.mateInPly = 0;
+            }
+
+            infoCallback(info);
+        }
+
+        if (bestResult.score > MATE_SCORE - MAX_PLY || bestResult.score < -MATE_SCORE + MAX_PLY)
+            break;
+    }
+
+    // Stop helpers and wait for them
+    stopFlag.store(true, std::memory_order_relaxed);
+    for (auto& t : helpers) {
+        if (t.joinable())
+            t.join();
     }
 
     return bestResult;
