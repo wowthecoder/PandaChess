@@ -14,6 +14,7 @@ add_library(engine STATIC
     attacks.cpp
     movegen.cpp
     eval.cpp
+    nnue.cpp
     tt.cpp
     search.cpp
     uci.cpp
