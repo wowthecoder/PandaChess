@@ -22,7 +22,7 @@
 
 using namespace panda;
 
-const int TOLERANCE = 20;
+const int TOLERANCE = 5;
 
 class NnueStockfishTestEnvironment : public ::testing::Environment {
    public:
@@ -166,7 +166,7 @@ double stockfish_to_cp_scale_a(const Board& board) {
     const int material = std::clamp(stockfish_material_count(board), 17, 78);
     const double m = double(material) / 58.0;
 
-    constexpr double as[] = {-72. 2565836, 185.93832038, -144.58862193, 416.44950446};
+    constexpr double as[] = {-72.32565836, 185.93832038, -144.58862193, 416.44950446};
     return (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
 }
 
@@ -217,6 +217,15 @@ TEST(NnueStockfishParityTest, PandaNnueIsSimilarToStockfishEval) {
         int sfWhiteCp = static_cast<int>(std::lround(*sfWhitePawns * 100.0));
         int sfStmCp = (board.side_to_move() == White) ? sfWhiteCp : -sfWhiteCp;
         int absDiff = std::abs(pandaStmCp - sfStmCp);
+
+        // Uncomment the following to see the scores printed
+        // In the terminal, from the engine folder, run `./build/tests/test_nnue
+        // --gtest_filter=NnueStockfishParityTest.PandaNnueIsSimilarToStockfishEval`
+
+        // std::cout <<
+        // "FEN: " << tc.fen << " pandaValue=" << pandaValue
+        //           << " pandaStmCp=" << pandaStmCp << " sfStmCp=" << sfStmCp
+        //           << " absDiff=" << absDiff << '\n';
 
         EXPECT_LE(absDiff, tc.toleranceCp)
             << "FEN: " << tc.fen << " pandaValue=" << pandaValue << " pandaStmCp=" << pandaStmCp

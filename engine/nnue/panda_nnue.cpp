@@ -302,14 +302,28 @@ class SfContext {
                 backend().networks->big.evaluate(pos, accumulators, caches->big);
         }
 
-        int nnueScore = (125 * int(psqt) + 131 * int(positional)) / 128;
-        if (useSmall && std::abs(nnueScore) < 277) {
+        sf::Value nnue = (125 * psqt + 131 * positional) / 128;
+        if (useSmall && std::abs(int(nnue)) < 277) {
             std::tie(psqt, positional) =
                 backend().networks->big.evaluate(pos, accumulators, caches->big);
-            nnueScore = (125 * int(psqt) + 131 * int(positional)) / 128;
+            nnue = (125 * psqt + 131 * positional) / 128;
+            useSmall = false;
         }
 
-        return nnueScore;
+        // Match Stockfish evaluate.cpp scaling path exactly (optimism is zero here).
+        int optimism = 0;
+        const int nnueComplexity = std::abs(int(psqt) - int(positional));
+        optimism += optimism * nnueComplexity / 476;
+        nnue -= nnue * nnueComplexity / 18236;
+
+        const int material = 534 * pos.count<sf::PAWN>() + pos.non_pawn_material();
+        int v = (int(nnue) * (77871 + material) + optimism * (7191 + material)) / 77871;
+
+        v -= v * pos.rule50_count() / 199;
+        v = std::clamp(v, int(sf::VALUE_TB_LOSS_IN_MAX_PLY) + 1,
+                       int(sf::VALUE_TB_WIN_IN_MAX_PLY) - 1);
+
+        return v;
     }
 
    private:
