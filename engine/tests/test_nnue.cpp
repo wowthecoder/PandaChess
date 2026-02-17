@@ -166,7 +166,7 @@ double stockfish_to_cp_scale_a(const Board& board) {
     const int material = std::clamp(stockfish_material_count(board), 17, 78);
     const double m = double(material) / 58.0;
 
-    constexpr double as[] = {-72. TOLERANCE65836, 185.93832038, -144.58862193, 416.44950446};
+    constexpr double as[] = {-72. 2565836, 185.93832038, -144.58862193, 416.44950446};
     return (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
 }
 
