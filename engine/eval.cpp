@@ -1,10 +1,32 @@
 #include "eval.h"
 
+#include <atomic>
+#include <cctype>
+
 #include "attacks.h"
 #include "bitboard.h"
+#include "nnue.h"
 #include "types.h"
 
 namespace panda {
+
+namespace {
+
+std::atomic<EvalMode> g_evalMode{EvalMode::NNUE};
+
+bool equalsCaseInsensitive(std::string_view lhs, std::string_view rhs) {
+    if (lhs.size() != rhs.size())
+        return false;
+
+    for (size_t i = 0; i < lhs.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(lhs[i])) !=
+            std::tolower(static_cast<unsigned char>(rhs[i])))
+            return false;
+    }
+    return true;
+}
+
+}  // namespace
 
 // ============================================================
 // PeSTO Tapered Evaluation
@@ -486,7 +508,7 @@ static void evalKingSafety(const Board& board, Color us, int sign, int& mgScore)
 // Main evaluation function
 // ============================================================
 
-int evaluate(const Board& board) {
+int evaluate_handcrafted(const Board& board) {
     int mgScore = 0;
     int egScore = 0;
     int phase = 0;
@@ -536,6 +558,42 @@ int evaluate(const Board& board) {
     int score = (mgScore * phase + egScore * (TOTAL_PHASE - phase)) / TOTAL_PHASE;
 
     return (board.side_to_move() == White) ? score : -score;
+}
+
+void set_eval_mode(EvalMode mode) {
+    g_evalMode.store(mode, std::memory_order_relaxed);
+}
+
+EvalMode get_eval_mode() {
+    return g_evalMode.load(std::memory_order_relaxed);
+}
+
+const char* eval_mode_name(EvalMode mode) {
+    return mode == EvalMode::NNUE ? "NNUE" : "Handcrafted";
+}
+
+bool parse_eval_mode(std::string_view value, EvalMode& modeOut) {
+    if (equalsCaseInsensitive(value, "NNUE")) {
+        modeOut = EvalMode::NNUE;
+        return true;
+    }
+
+    if (equalsCaseInsensitive(value, "Handcrafted")) {
+        modeOut = EvalMode::Handcrafted;
+        return true;
+    }
+
+    return false;
+}
+
+int evaluate(const Board& board, nnue::SearchNnueContext* ctx) {
+    if (get_eval_mode() == EvalMode::NNUE)
+        return evaluate_nnue(board, ctx);
+    return evaluate_handcrafted(board);
+}
+
+int evaluate(const Board& board) {
+    return evaluate(board, nullptr);
 }
 
 }  // namespace panda

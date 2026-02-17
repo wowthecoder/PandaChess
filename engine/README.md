@@ -7,10 +7,11 @@ This folder contains the C++ UCI chess engine used by PandaChess.
 - Bitboard board representation with mailbox + incremental Zobrist hash.
 - Legal move generation (including castling, en passant, promotions).
 - Magic-bitboard sliding attacks for bishops/rooks.
+- Eval mode switch (`Eval`) with `NNUE`/`Handcrafted` modes (default `NNUE`).
 - Tapered handcrafted evaluation (middlegame/endgame blend).
 - Negamax alpha-beta search with iterative deepening.
 - Transposition table, quiescence search, and common pruning/reduction heuristics.
-- UCI protocol loop with configurable `Hash` and `Threads`.
+- UCI protocol loop with configurable `Hash`, `Threads`, and `Eval`.
 - Multi-threaded Lazy SMP search mode.
 
 ## Build
@@ -71,6 +72,7 @@ quit
 - `stop`
 - `setoption name Hash value <1..4096>`
 - `setoption name Threads value <1..256>`
+- `setoption name Eval value <NNUE|Handcrafted>`
 - `quit`
 
 ## Search Overview
@@ -137,7 +139,10 @@ Returned score is from side-to-move perspective.
 - `main.cpp`: executable entry point.
 - `uci.cpp`: UCI loop, command parsing, time management, search thread orchestration.
 - `search.cpp/.h`: iterative deepening, negamax, quiescence, pruning, SMP.
-- `eval.cpp/.h`: handcrafted tapered evaluation.
+- `eval.cpp/.h`: eval mode control + handcrafted tapered evaluation.
+- `nnue.cpp/.h`: NNUE mode entry point / fallback wiring.
+- `nnue/panda_nnue.cpp/.h`: active SF18 NNUE bridge + search-context incremental state wiring.
+- `stockfish_src/nnue/`: Stockfish NNUE core used by the bridge implementation.
 - `tt.cpp/.h`: transposition table.
 - `movegen.cpp/.h`: legal move generation and perft.
 - `attacks.cpp/.h`: attack tables and magic-bitboard sliders.
@@ -161,4 +166,5 @@ cutechess-cli \
 ## Notes
 
 - `tests/CMakeLists.txt` fetches GoogleTest automatically if it is not already available.
-- `sfnn_v9.nnue` exists in this folder, but the current engine code path uses handcrafted evaluation (`eval.cpp`).
+- `Eval=NNUE` loads both `nnue/sfnn_v10_big.nnue` and `nnue/sfnn_v10_small.nnue` (with source-dir and build-dir fallbacks). If either net is missing/invalid, it falls back to handcrafted evaluation.
+- The NNUE backend uses Stockfish 18-style big/small networks and incremental accumulators inside search workers.

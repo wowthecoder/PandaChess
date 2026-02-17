@@ -9,6 +9,7 @@
 
 #include "attacks.h"
 #include "board.h"
+#include "eval.h"
 #include "move.h"
 #include "movegen.h"
 #include "search.h"
@@ -225,6 +226,7 @@ void uci_loop() {
     std::atomic<bool> stopFlag{false};
     std::thread searchThread;
     int numThreads = 4;
+    set_eval_mode(EvalMode::NNUE);
 
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -238,6 +240,8 @@ void uci_loop() {
             std::cout << "option name Hash type spin default 64 min 1 max 4096" << std::endl;
             std::cout << "option name Threads type spin default " << 4
                       << " min 1 max 256" << std::endl;
+            std::cout << "option name Eval type combo default NNUE var NNUE var Handcrafted"
+                      << std::endl;
             std::cout << "uciok" << std::endl;
         } else if (cmd == "isready") {
             std::cout << "readyok" << std::endl;
@@ -287,6 +291,10 @@ void uci_loop() {
                     if (threads > 256)
                         threads = 256;
                     numThreads = threads;
+                } else if (name == "Eval") {
+                    EvalMode mode;
+                    if (parse_eval_mode(value, mode))
+                        set_eval_mode(mode);
                 }
             }
         } else if (cmd == "quit") {

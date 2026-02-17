@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
+#include <vector>
 
 #include "../attacks.h"
 #include "../board.h"
 #include "../eval.h"
+#include "../movegen.h"
+#include "../nnue.h"
 #include "../zobrist.h"
 
 using namespace panda;
@@ -12,6 +15,7 @@ class EvalTestEnvironment : public ::testing::Environment {
     void SetUp() override {
         zobrist::init();
         attacks::init();
+        set_eval_mode(EvalMode::Handcrafted);
     }
 };
 
@@ -205,4 +209,65 @@ TEST(EvalTest, MirroredPositionOppositeScores) {
     // Scores should be roughly opposite.
     EXPECT_GT(whiteUp, 0);
     EXPECT_LT(blackUp, 0);
+}
+
+TEST(NnueBackendTest, LoadsSf18V10Nets) {
+    set_eval_mode(EvalMode::NNUE);
+    EXPECT_TRUE(nnue_backend_ready());
+    set_eval_mode(EvalMode::Handcrafted);
+}
+
+TEST(NnueIncrementalTest, MatchesFreshEvalAcrossMakeUnmakeSequence) {
+    if (!nnue_backend_ready())
+        GTEST_SKIP() << "SF18 NNUE nets not available";
+
+    Board board;
+    board.set_fen(StartFEN);
+
+    nnue::SearchNnueContext incCtx;
+    incCtx.reset(board);
+
+    auto expectParity = [&]() {
+        const int incremental = evaluate_nnue(board, &incCtx);
+        const int refreshed = evaluate_nnue(board);
+        EXPECT_EQ(incremental, refreshed);
+    };
+
+    expectParity();
+
+    std::vector<Move> moves;
+    std::vector<Board::UndoInfo> undos;
+    moves.reserve(32);
+    undos.reserve(32);
+
+    uint32_t seed = 0x9E3779B9u;
+    for (int ply = 0; ply < 24; ++ply) {
+        MoveList legal = generate_legal(board);
+        ASSERT_GT(legal.size(), 0);
+
+        seed = seed * 1664525u + 1013904223u;
+        const int pick = int(seed % uint32_t(legal.size()));
+        Move m = legal[pick];
+
+        Board::UndoInfo undo;
+        board.make_move(m, undo);
+        incCtx.on_make_move(board, m, undo.nnueDirtyPiece, undo.nnueDirtyThreats);
+
+        moves.push_back(m);
+        undos.push_back(undo);
+
+        expectParity();
+    }
+
+    while (!moves.empty()) {
+        const Move m = moves.back();
+        const Board::UndoInfo undo = undos.back();
+        moves.pop_back();
+        undos.pop_back();
+
+        board.unmake_move(m, undo);
+        incCtx.on_unmake_move(board);
+
+        expectParity();
+    }
 }

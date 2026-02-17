@@ -364,6 +364,18 @@ void Board::make_move(Move m, UndoInfo& undo) {
     undo.halfmoveClock = halfmoveClock;
     undo.fullmoveNumber = fullmoveNumber;
     undo.hash = hash;
+    undo.nnueNullMove = false;
+    undo.nnueDirtyPiece = {};
+    undo.nnueDirtyThreats.clear();
+
+    const Square prevKsq = lsb(pieces(us, King));
+    undo.nnueDirtyThreats.us = us;
+    undo.nnueDirtyThreats.prevKsq = prevKsq;
+    undo.nnueDirtyThreats.ksq = prevKsq;
+
+    undo.nnueDirtyPiece.pc = moved;
+    undo.nnueDirtyPiece.from = from;
+    undo.nnueDirtyPiece.to = to;
 
     // Remove old castling hash, EP hash
     hash ^= zobrist::castlingKeys[castling];
@@ -379,6 +391,8 @@ void Board::make_move(Move m, UndoInfo& undo) {
         captured = mailbox[capSq];
         undo.captured = captured;
         undo.capturedSquare = capSq;
+        undo.nnueDirtyPiece.remove_sq = capSq;
+        undo.nnueDirtyPiece.remove_pc = captured;
         remove_piece(capSq);
         remove_piece(from);
         put_piece(moved, to);
@@ -400,19 +414,34 @@ void Board::make_move(Move m, UndoInfo& undo) {
         remove_piece(rookFrom);
         put_piece(rook, rookTo);
         halfmoveClock++;
+
+        undo.nnueDirtyPiece.remove_sq = rookFrom;
+        undo.nnueDirtyPiece.remove_pc = rook;
+        undo.nnueDirtyPiece.add_sq = rookTo;
+        undo.nnueDirtyPiece.add_pc = rook;
+        undo.nnueDirtyThreats.ksq = to;
     } else if (mt == Promotion) {
         PieceType promoPt = promotion_type(m);
         Piece promoPiece = make_piece(us, promoPt);
-        if (captured != NoPiece)
+        if (captured != NoPiece) {
             remove_piece(to);
+            undo.nnueDirtyPiece.remove_sq = to;
+            undo.nnueDirtyPiece.remove_pc = captured;
+        }
         remove_piece(from);
         put_piece(promoPiece, to);
         halfmoveClock = 0;
+
+        undo.nnueDirtyPiece.to = NoSquare;
+        undo.nnueDirtyPiece.add_sq = to;
+        undo.nnueDirtyPiece.add_pc = promoPiece;
     } else {
         // Normal move
         if (captured != NoPiece) {
             remove_piece(to);
             halfmoveClock = 0;
+            undo.nnueDirtyPiece.remove_sq = to;
+            undo.nnueDirtyPiece.remove_pc = captured;
         } else if (piece_type(moved) == Pawn) {
             halfmoveClock = 0;
             // Double pawn push — set en passant square
@@ -425,6 +454,9 @@ void Board::make_move(Move m, UndoInfo& undo) {
         }
         remove_piece(from);
         put_piece(moved, to);
+
+        if (piece_type(moved) == King)
+            undo.nnueDirtyThreats.ksq = to;
     }
 
     // Update castling rights
@@ -502,6 +534,15 @@ void Board::make_null_move(UndoInfo& undo) {
     undo.halfmoveClock = halfmoveClock;
     undo.fullmoveNumber = fullmoveNumber;
     undo.hash = hash;
+    undo.nnueNullMove = true;
+    undo.nnueDirtyPiece = {};
+    undo.nnueDirtyThreats.clear();
+    undo.nnueDirtyThreats.us = sideToMove;
+    if (pieces(sideToMove, King)) {
+        Square ksq = lsb(pieces(sideToMove, King));
+        undo.nnueDirtyThreats.prevKsq = ksq;
+        undo.nnueDirtyThreats.ksq = ksq;
+    }
 
     // Remove old EP hash
     if (epSquare != NoSquare)

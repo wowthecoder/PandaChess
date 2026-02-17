@@ -5,6 +5,7 @@
 
 #include "bitboard.h"
 #include "move.h"
+#include "nnue/panda_nnue.h"
 #include "types.h"
 
 namespace panda {
@@ -23,6 +24,9 @@ class Board {
         int halfmoveClock = 0;
         int fullmoveNumber = 1;
         uint64_t hash = 0;
+        nnue::DirtyPiece nnueDirtyPiece;
+        nnue::DirtyThreats nnueDirtyThreats;
+        bool nnueNullMove = false;
     };
 
     Board();

@@ -264,6 +264,11 @@ TEST(MakeMoveTest, UnmakeRoundtripNormalMove) {
     Move m = make_move(E2, E4);
     Board::UndoInfo undo;
     board.make_move(m, undo);
+    EXPECT_EQ(undo.nnueDirtyPiece.pc, WhitePawn);
+    EXPECT_EQ(undo.nnueDirtyPiece.from, E2);
+    EXPECT_EQ(undo.nnueDirtyPiece.to, E4);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_sq, NoSquare);
+    EXPECT_FALSE(undo.nnueNullMove);
     board.unmake_move(m, undo);
 
     EXPECT_EQ(board.to_fen(), beforeFen);
@@ -280,6 +285,11 @@ TEST(MakeMoveTest, UnmakeRoundtripEnPassant) {
     Move m = make_move(E5, D6, EnPassant);
     Board::UndoInfo undo;
     board.make_move(m, undo);
+    EXPECT_EQ(undo.nnueDirtyPiece.pc, WhitePawn);
+    EXPECT_EQ(undo.nnueDirtyPiece.from, E5);
+    EXPECT_EQ(undo.nnueDirtyPiece.to, D6);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_sq, D5);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_pc, BlackPawn);
     board.unmake_move(m, undo);
 
     EXPECT_EQ(board.to_fen(), beforeFen);
@@ -296,6 +306,13 @@ TEST(MakeMoveTest, UnmakeRoundtripCastling) {
     Move m = make_move(E1, G1, Castling);
     Board::UndoInfo undo;
     board.make_move(m, undo);
+    EXPECT_EQ(undo.nnueDirtyPiece.pc, WhiteKing);
+    EXPECT_EQ(undo.nnueDirtyPiece.from, E1);
+    EXPECT_EQ(undo.nnueDirtyPiece.to, G1);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_sq, H1);
+    EXPECT_EQ(undo.nnueDirtyPiece.add_sq, F1);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_pc, WhiteRook);
+    EXPECT_EQ(undo.nnueDirtyPiece.add_pc, WhiteRook);
     board.unmake_move(m, undo);
 
     EXPECT_EQ(board.to_fen(), beforeFen);
@@ -312,6 +329,13 @@ TEST(MakeMoveTest, UnmakeRoundtripPromotionCapture) {
     Move m = make_promotion(A7, B8, Queen);
     Board::UndoInfo undo;
     board.make_move(m, undo);
+    EXPECT_EQ(undo.nnueDirtyPiece.pc, WhitePawn);
+    EXPECT_EQ(undo.nnueDirtyPiece.from, A7);
+    EXPECT_EQ(undo.nnueDirtyPiece.to, NoSquare);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_sq, B8);
+    EXPECT_EQ(undo.nnueDirtyPiece.remove_pc, BlackKnight);
+    EXPECT_EQ(undo.nnueDirtyPiece.add_sq, B8);
+    EXPECT_EQ(undo.nnueDirtyPiece.add_pc, WhiteQueen);
     board.unmake_move(m, undo);
 
     EXPECT_EQ(board.to_fen(), beforeFen);
@@ -327,6 +351,8 @@ TEST(MakeMoveTest, UnmakeRoundtripNullMove) {
 
     Board::UndoInfo undo;
     board.make_null_move(undo);
+    EXPECT_TRUE(undo.nnueNullMove);
+    EXPECT_EQ(undo.nnueDirtyPiece.pc, NoPiece);
     board.unmake_null_move(undo);
 
     EXPECT_EQ(board.to_fen(), beforeFen);

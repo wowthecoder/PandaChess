@@ -11,6 +11,7 @@
 #include "attacks.h"
 #include "eval.h"
 #include "movegen.h"
+#include "nnue/panda_nnue.h"
 
 namespace panda {
 
@@ -26,6 +27,7 @@ struct SearchState {
     std::atomic<bool>* externalStop;  // set by UCI "stop" command
     uint64_t nodes;
     std::atomic<uint64_t>* sharedNodes;  // shared across all SMP threads
+    nnue::SearchNnueContext nnueCtx;
 
     explicit SearchState(TranspositionTable& tt_, std::atomic<bool>* extStop = nullptr,
                          std::atomic<uint64_t>* shared = nullptr)
@@ -369,7 +371,7 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
             return 0;
 
         // Stand pat only if not in check
-        standPat = evaluate(board);
+        standPat = evaluate(board, &state.nnueCtx);
 
         if (standPat >= beta)
             return beta;
@@ -413,6 +415,7 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
 
         Board::UndoInfo undo;
         board.make_move(m, undo);
+        state.nnueCtx.on_make_move(board, m, undo.nnueDirtyPiece, undo.nnueDirtyThreats);
         int childRepIndex = repIndex + 1;
         if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
             state.repetitionHistory.push_back(board.hash_key());
@@ -421,6 +424,7 @@ static int quiescence(Board& board, int alpha, int beta, SearchState& state, int
 
         int score = -quiescence(board, -beta, -alpha, state, ply + 1, childRepIndex);
         board.unmake_move(m, undo);
+        state.nnueCtx.on_unmake_move(board);
 
         if (state.stopped)
             return 0;
@@ -540,7 +544,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
     }
 
     bool inCheck = in_check(board);
-    int staticEval = evaluate(board);
+    int staticEval = evaluate(board, &state.nnueCtx);
 
     // Reverse futility pruning (static null move pruning)
     // If our position is so good that even after a margin we still beat beta, prune.
@@ -555,6 +559,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
         nonPawnMaterial(board, board.side_to_move()) >= NMP_MIN_MATERIAL) {
         Board::UndoInfo nullUndo;
         board.make_null_move(nullUndo);
+        state.nnueCtx.on_null_move(board);
 
         int reduction = NMP_REDUCTION + (depth > 6 ? 1 : 0);  // deeper nodes get extra reduction
         int nullDepth = depth - 1 - reduction;
@@ -569,6 +574,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
         int nullScore =
             -negamax(board, nullDepth, -beta, -beta + 1, state, ply + 1, nullRepIndex, false);
         board.unmake_null_move(nullUndo);
+        state.nnueCtx.on_unmake_null_move(board);
 
         if (state.stopped)
             return 0;
@@ -612,6 +618,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
 
         Board::UndoInfo undo;
         board.make_move(m, undo);
+        state.nnueCtx.on_make_move(board, m, undo.nnueDirtyPiece, undo.nnueDirtyThreats);
         int childRepIndex = repIndex + 1;
         if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
             state.repetitionHistory.push_back(board.hash_key());
@@ -659,6 +666,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, SearchState& st
             score = -negamax(board, depth - 1, -beta, -alpha, state, ply + 1, childRepIndex);
         }
         board.unmake_move(m, undo);
+        state.nnueCtx.on_unmake_move(board);
 
         if (state.stopped)
             return 0;
@@ -723,6 +731,7 @@ static SearchResult searchRoot(Board& board, int depth, int alpha, int beta, Sea
 
         Board::UndoInfo undo;
         board.make_move(m, undo);
+        state.nnueCtx.on_make_move(board, m, undo.nnueDirtyPiece, undo.nnueDirtyThreats);
         int childRepIndex = state.rootRepIndex + 1;
         if (childRepIndex >= static_cast<int>(state.repetitionHistory.size()))
             state.repetitionHistory.push_back(board.hash_key());
@@ -731,6 +740,7 @@ static SearchResult searchRoot(Board& board, int depth, int alpha, int beta, Sea
 
         int score = -negamax(board, depth - 1, -beta, -alpha, state, 1, childRepIndex);
         board.unmake_move(m, undo);
+        state.nnueCtx.on_unmake_move(board);
 
         if (state.stopped)
             break;
@@ -773,6 +783,7 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
     state.timeLimitMs = timeLimitMs;
     initRepetitionHistory(state, board, {});
     Board root = board;
+    state.nnueCtx.reset(root);
 
     SearchResult bestResult = {NullMove, 0};
 
@@ -807,8 +818,12 @@ SearchResult search(const Board& board, int timeLimitMs, TranspositionTable& tt)
             }
         }
 
-        if (state.stopped)
+        if (state.stopped) {
+            // Keep a legal move if we were stopped during the first iteration.
+            if (depth == 1 && result.bestMove != NullMove)
+                bestResult = result;
             break;  // Discard partial iteration, use previous result
+        }
         bestResult = result;
 
         // Early exit if we found a forced mate
@@ -826,6 +841,7 @@ SearchResult searchDepth(const Board& board, int depth, TranspositionTable& tt) 
     state.timeLimitMs = 0;  // 0 means no time limit
     initRepetitionHistory(state, board, {});
     Board root = board;
+    state.nnueCtx.reset(root);
 
     if (depth < 1)
         depth = 1;
@@ -871,6 +887,7 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
     state.timeLimitMs = timeLimitMs;
     initRepetitionHistory(state, board, repetitionHistory);
     Board root = board;
+    state.nnueCtx.reset(root);
 
     SearchResult bestResult = {NullMove, 0};
 
@@ -968,6 +985,7 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
         state.timeLimitMs = timeLimitMs;
         initRepetitionHistory(state, board, repetitionHistory);
         Board root = board;
+        state.nnueCtx.reset(root);
 
         int workerMaxDepth = (maxDepth < 1) ? MAX_PLY : maxDepth;
 
@@ -1007,6 +1025,7 @@ SearchResult search(const Board& board, int timeLimitMs, int maxDepth, Transposi
     mainState.timeLimitMs = timeLimitMs;
     initRepetitionHistory(mainState, board, repetitionHistory);
     Board root = board;
+    mainState.nnueCtx.reset(root);
 
     SearchResult bestResult = {NullMove, 0};
     int effectiveMaxDepth = (maxDepth < 1) ? MAX_PLY : maxDepth;
@@ -1094,6 +1113,7 @@ int quiescenceForTests(const Board& board, int alpha, int beta,
     initRepetitionHistory(state, board, repetitionHistory);
 
     Board copy = board;
+    state.nnueCtx.reset(copy);
     return quiescence(copy, alpha, beta, state, 0, state.rootRepIndex);
 }
 

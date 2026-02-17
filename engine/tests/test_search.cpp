@@ -18,6 +18,7 @@ class SearchTestEnvironment : public ::testing::Environment {
     void SetUp() override {
         zobrist::init();
         attacks::init();
+        set_eval_mode(EvalMode::Handcrafted);
     }
 };
 

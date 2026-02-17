@@ -45,3 +45,6 @@ engine/build/
 
 # opencode produced cache files
 engine/.cache/
+
+# stockfish code
+engine/stockfish_src/

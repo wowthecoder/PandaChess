@@ -16,7 +16,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-To estimate ELO Rating, run this in the terminal (in the engine folder):
+To estimate ELO Rating, run this in the terminal (in the engine folder).
+This is testing against Stockfish 14.1:
 ```
 cutechess-cli \
   -engine cmd=./build/panda-chess name=Panda proto=uci \
